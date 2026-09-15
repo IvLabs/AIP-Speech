@@ -85,7 +85,7 @@ secrets = [hf_secret] if hf_secret else []
     },
     secrets=secrets,
 )
-def run_kws_steer_inference(model: str = "all", smoke_test: bool = False):
+def run_kws_steer_inference(model: str = "all"):
     import time
     import shutil
     os.chdir("/workspace")
@@ -113,20 +113,16 @@ def run_kws_steer_inference(model: str = "all", smoke_test: bool = False):
     # Run Inference for KWS STEERABILITY task ONLY
     print("\n--- RUNNING KWS STEERABILITY INFERENCE ---")
     cmd_infer = ["python", "scripts/05_inference.py", "--model", model, "--task", "kws_steer_p5"]
-    if smoke_test:
-        cmd_infer.append("--smoke-test")
-        
+
     proc2 = subprocess.Popen(cmd_infer)
     proc2.wait()
     if proc2.returncode != 0:
         raise RuntimeError("Failed KWS STEERABILITY inference")
-        
+
     # Score KWS STEERABILITY task remotely
     print("\n--- SCORING KWS STEERABILITY METRICS ---")
     cmd_score = ["python", "scripts/06_score_metrics.py"]
-    if smoke_test:
-        cmd_score.append("--smoke-test")
-        
+
     proc3 = subprocess.run(cmd_score, capture_output=False)
     if proc3.returncode != 0:
         raise RuntimeError("Failed scoring metrics")
@@ -134,15 +130,15 @@ def run_kws_steer_inference(model: str = "all", smoke_test: bool = False):
     print("\nKWS STEERABILITY INFERENCE & EVALUATION COMPLETED SUCCESSFULLY!")
 
 @app.local_entrypoint()
-def main(model: str = "all", smoke_test: bool = False):
+def main(model: str = "all"):
     import time
     import threading
-    
+
     local_inference_dir = os.path.join(LOCAL_AIP_SPEECH_DIR, "inference_1")
     local_sync_all_dir = os.path.join(LOCAL_AIP_SPEECH_DIR, "inference_sync_all_1784759190")
     local_results_dir = os.path.join(LOCAL_AIP_SPEECH_DIR, "results")
-    
-    print(f"Starting KWS STEERABILITY Inference on Modal. model={model}, smoke_test={smoke_test}")
+
+    print(f"Starting KWS STEERABILITY Inference on Modal. model={model}")
     
     def sync_volume():
         print(f"Starting periodic volume sync (every 5 mins)...")
@@ -170,7 +166,7 @@ def main(model: str = "all", smoke_test: bool = False):
     sync_thread.start()
     
     try:
-        run_kws_steer_inference.remote(model, smoke_test)
+        run_kws_steer_inference.remote(model)
     finally:
         print("\nRun finished. Executing final sync of inference and results...")
         temp_sync = os.path.join(LOCAL_AIP_SPEECH_DIR, "temp_kws_steer_sync")

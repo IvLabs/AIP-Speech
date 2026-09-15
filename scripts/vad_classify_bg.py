@@ -24,7 +24,6 @@ Outputs:
 
 Usage:
     python scripts/vad_classify_bg.py                  # classify all BGs
-    python scripts/vad_classify_bg.py --smoke-test     # first 3 BGs only
     python scripts/vad_classify_bg.py --aggressiveness 3   # stricter webrtcvad
 
 Dependencies (already in requirements.txt or installable):
@@ -214,15 +213,11 @@ def _ensemble_vote(silero_vote: str, webrtc_vote: str) -> str:
 # ── Main classification loop ──────────────────────────────────────────────────
 def classify_bg_folder(bg_dir: Path,
                        silero_sensitivity: float,
-                       webrtc_aggressiveness: int,
-                       smoke: bool) -> list[dict]:
+                       webrtc_aggressiveness: int) -> list[dict]:
     wav_files = sorted(bg_dir.glob("*.wav"))
     if not wav_files:
         log.error(f"No WAV files found in {bg_dir}")
         return []
-    if smoke:
-        wav_files = wav_files[:3]
-        log.info(f"[smoke-test] Processing only first {len(wav_files)} files.")
 
     log.info(f"[VAD] {len(wav_files)} WAV files in {bg_dir}")
     log.info(f"[VAD] Silero sensitivity (default=0.5)   : {silero_sensitivity}")
@@ -377,12 +372,8 @@ def main() -> None:
             f"(default: {WEBRTC_AGGRESSIVENESS})"
         ),
     )
-    ap.add_argument("--smoke-test", action="store_true",
-                    help="Process only the first 3 WAV files.")
     args = ap.parse_args()
 
-    if args.smoke_test:
-        log.info("=== SMOKE TEST MODE ===")
     if not args.bg_dir.exists():
         log.error(f"bg-dir does not exist: {args.bg_dir}")
         sys.exit(1)
@@ -391,7 +382,6 @@ def main() -> None:
         bg_dir=args.bg_dir,
         silero_sensitivity=args.sensitivity,
         webrtc_aggressiveness=args.aggressiveness,
-        smoke=args.smoke_test,
     )
     _save_csv(records, args.out)
     _print_summary(records)

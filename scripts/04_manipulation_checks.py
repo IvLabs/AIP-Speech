@@ -10,7 +10,6 @@ Checks (from §Stage 4 of implementation plan):
 Also materialises the fixed ~60-clip inspection sample → checks/inspection/
 
 Usage:
-  python scripts/04_manipulation_checks.py --smoke-test   # 5 clips
   python scripts/04_manipulation_checks.py                # full checks
 """
 from __future__ import annotations
@@ -41,7 +40,6 @@ DETERMINISM = ROOT / "checks" / "determinism.json"
 
 RANDOM_SEED    = 42
 INSPECT_N      = 60   # full inspection sample size
-INSPECT_N_SMOKE = 5
 
 
 # ── build inspection sample ───────────────────────────────────────────────────
@@ -61,14 +59,14 @@ def _load_asr_items(n: int) -> list[dict]:
     return items[:n]
 
 
-def materialise_inspection(prog: ProgressLog, smoke: bool) -> None:
+def materialise_inspection(prog: ProgressLog) -> None:
     """Write ~60 clips to checks/inspection/ for manual listening."""
     key = "inspection_sample"
     if prog.done(key):
         log.info("[skip] Inspection sample already materialised.")
         return
 
-    n = INSPECT_N_SMOKE if smoke else INSPECT_N
+    n = INSPECT_N
     battery = _load_battery()
     speech_items = _load_asr_items(n)
 
@@ -105,7 +103,7 @@ def materialise_inspection(prog: ProgressLog, smoke: bool) -> None:
 
 
 # ── check 1: background presence ─────────────────────────────────────────────
-def check_bg_presence(prog: ProgressLog, smoke: bool) -> None:
+def check_bg_presence(prog: ProgressLog) -> None:
     """
     Confirm background is audible in each inspection clip using a simple
     speech-energy proxy: noisy mix should have more high-freq energy than clean.
@@ -119,9 +117,6 @@ def check_bg_presence(prog: ProgressLog, smoke: bool) -> None:
     if not clips:
         log.warning("[bg_presence] No inspection clips found.")
         return
-
-    if smoke:
-        clips = clips[:INSPECT_N_SMOKE]
 
     for clip in clips:
         x = load_audio(clip)
@@ -140,7 +135,7 @@ def check_bg_presence(prog: ProgressLog, smoke: bool) -> None:
 
 
 # ── check 2: WER constancy ────────────────────────────────────────────────────
-def check_wer_constancy(prog: ProgressLog, smoke: bool) -> None:
+def check_wer_constancy(prog: ProgressLog) -> None:
     """
     Whisper WER on the inspection clips should not vary wildly across backgrounds
     at a fixed SNR. We run Whisper-base on each clip and record WER.
@@ -158,8 +153,6 @@ def check_wer_constancy(prog: ProgressLog, smoke: bool) -> None:
         return
 
     clips = sorted(INSPECT_DIR.glob("*.wav"))
-    if smoke:
-        clips = clips[:INSPECT_N_SMOKE]
 
     wmodel = whisper.load_model(
         "base",
@@ -194,7 +187,7 @@ def check_wer_constancy(prog: ProgressLog, smoke: bool) -> None:
 
 
 # ── check 3: determinism floor ────────────────────────────────────────────────
-def check_determinism(prog: ProgressLog, smoke: bool) -> None:
+def check_determinism(prog: ProgressLog) -> None:
     """
     Evaluate transcribe determinism by running Whisper twice on same WAVs.
     """
@@ -211,11 +204,8 @@ def check_determinism(prog: ProgressLog, smoke: bool) -> None:
 
     df = pd.read_csv(asr_f)
     noisy = df[df["condition"] == "noisy"]
-    if smoke:
-        noisy = noisy.head(INSPECT_N_SMOKE)
-    else:
-        # Sample 10 items for speed but sufficient coverage
-        noisy = noisy.sample(n=min(len(noisy), 10), random_state=RANDOM_SEED)
+    # Sample 10 items for speed but sufficient coverage
+    noisy = noisy.sample(n=min(len(noisy), 10), random_state=RANDOM_SEED)
 
     try:
         import whisper
@@ -261,17 +251,13 @@ def check_determinism(prog: ProgressLog, smoke: bool) -> None:
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 4 — Manipulation checks")
-    ap.add_argument("--smoke-test", action="store_true",
-                    help="Run checks on 5 clips only.")
-    args = ap.parse_args()
-    if args.smoke_test:
-        log.info("=== SMOKE TEST MODE ===")
+    ap.parse_args()
 
     prog = ProgressLog(PROGRESS)
-    materialise_inspection(prog, smoke=args.smoke_test)
-    check_bg_presence(prog, smoke=args.smoke_test)
-    check_wer_constancy(prog, smoke=args.smoke_test)
-    check_determinism(prog, smoke=args.smoke_test)
+    materialise_inspection(prog)
+    check_bg_presence(prog)
+    check_wer_constancy(prog)
+    check_determinism(prog)
     log.info("=== Stage 4 complete. ===")
 
 

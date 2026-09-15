@@ -11,13 +11,13 @@ Experiments scored:
 Outputs → results/*.csv  +  results/summary_table.csv
 
 Usage:
-  python scripts/06_score_metrics.py --smoke-test   # quick validation
   python scripts/06_score_metrics.py                # full scoring
 """
 from __future__ import annotations
 
 import argparse
 import json
+import string
 import sys
 from pathlib import Path
 
@@ -32,7 +32,6 @@ log = get_logger("06_score_metrics")
 RESULTS   = ROOT / "results"
 INFER     = ROOT / "inference_1"
 BATTERY_F = ROOT / "descriptors" / "battery.parquet"
-SMOKE_N   = 10
 
 KWS_TARGETS = ["yes", "no", "up", "down", "left", "right",
                "on", "off", "stop", "go"]
@@ -120,6 +119,16 @@ def _error_counts(ref: str, hyp: str) -> dict:
         return {"substitutions": 0, "deletions": 0, "insertions": 0}
 
 
+def _score_kws_row(ref_kw: str, hyp_raw: str, is_target: bool) -> tuple[str, bool, bool]:
+    """Closed-set KWS correctness: target needs exact match; non-target is
+    correct only if no target keyword was predicted."""
+    hyp_kw = hyp_raw.split()[0] if hyp_raw else "silence"
+    hyp_kw = hyp_kw.strip(string.punctuation)
+    correct = (hyp_kw == ref_kw) if is_target else (hyp_kw not in KWS_TARGETS)
+    false_alarm = (not is_target) and (hyp_kw in KWS_TARGETS)
+    return hyp_kw, correct, false_alarm
+
+
 def _save(df: pd.DataFrame, name: str) -> Path:
     out = RESULTS / name
     if df.empty:
@@ -135,15 +144,13 @@ def _save(df: pd.DataFrame, name: str) -> Path:
 
 
 # ── E1-ASR: WER, CER, ΔWER ───────────────────────────────────────────────────
-def score_e1_asr(smoke: bool) -> pd.DataFrame:
+def score_e1_asr() -> pd.DataFrame:
     log.info("[E1-ASR] Scoring WER / CER / ΔWER ...")
     records = []
     for mid in _all_models():
         df = _load_inference(mid, "asr")
         if df.empty:
             continue
-        if smoke:
-            df = df.head(SMOKE_N)
         for _, row in df.iterrows():
             ref = str(row.get("transcript", ""))
             hyp = str(row.get("raw", ""))
@@ -179,26 +186,20 @@ def score_e1_asr(smoke: bool) -> pd.DataFrame:
 
 
 # ── E1-KWS: Accuracy, FAR, Miss ──────────────────────────────────────────────
-def score_e1_kws(smoke: bool) -> pd.DataFrame:
+def score_e1_kws() -> pd.DataFrame:
     log.info("[E1-KWS] Scoring Accuracy / FAR / Miss ...")
     records = []
     for mid in _all_models():
         df = _load_inference(mid, "kws")
         if df.empty:
             continue
-        if smoke:
-            df = df.head(SMOKE_N)
         for _, row in df.iterrows():
             ref_kw    = str(row.get("keyword", "")).lower().strip()
             hyp_raw   = str(row.get("raw", "")).lower().strip()
             is_target = bool(row.get("is_target", False))
             if hyp_raw == "__error__":
                 continue
-            hyp_kw   = hyp_raw.split()[0] if hyp_raw else "silence"
-            import string
-            hyp_kw   = hyp_kw.strip(string.punctuation)
-            correct  = (hyp_kw == ref_kw) if is_target else (hyp_kw not in KWS_TARGETS)
-            false_alarm = (not is_target) and (hyp_kw in KWS_TARGETS)
+            hyp_kw, correct, false_alarm = _score_kws_row(ref_kw, hyp_raw, is_target)
             records.append({
                 "model": mid,
                 "speech_id":     row.get("speech_id", ""),
@@ -218,84 +219,7 @@ def score_e1_kws(smoke: bool) -> pd.DataFrame:
     return out
 
 
-def _normalize_answer(s: str) -> str:
-    """Lower text and remove punctuation, articles and extra whitespace."""
-    import re, string
-    def remove_articles(text):
-        return re.sub(r'\b(a|an|the)\b', ' ', text)
-    def white_space_fix(text):
-        return ' '.join(text.split())
-    def remove_punc(text):
-        exclude = set(string.punctuation)
-        return ''.join(ch for ch in text if ch not in exclude)
-    def lower(text):
-        return text.lower()
-    return white_space_fix(remove_articles(remove_punc(lower(s))))
-
-def _exact_match_score(prediction: str, ground_truth: str) -> float:
-    return float(_normalize_answer(prediction) == _normalize_answer(ground_truth))
-
-def _f1_score(prediction: str, ground_truth: str) -> float:
-    prediction_tokens = _normalize_answer(prediction).split()
-    ground_truth_tokens = _normalize_answer(ground_truth).split()
-    common = set(prediction_tokens) & set(ground_truth_tokens)
-    if not common:
-        return 0.0
-    # count how many times common tokens appear in prediction (to handle duplicates if needed)
-    num_same = sum(1 for token in prediction_tokens if token in common)
-    precision = 1.0 * num_same / len(prediction_tokens)
-    recall = 1.0 * num_same / len(ground_truth_tokens)
-    f1 = (2 * precision * recall) / (precision + recall)
-    return float(f1)
-
-def _hallucination_rate(prediction: str, passage: str) -> float:
-    """Percentage of predicted tokens that do not appear in the source passage."""
-    pred_tokens = set(_normalize_answer(prediction).split())
-    passage_tokens = set(_normalize_answer(passage).split())
-    if not pred_tokens:
-        return 0.0
-    hallucinated = pred_tokens - passage_tokens
-    return len(hallucinated) / len(pred_tokens)
-
-# ── E1-SQA: EM, F1, Hallucination ───────────────────────────────────────────
-def score_e1_sqa(smoke: bool) -> pd.DataFrame:
-    log.info("[E1-SQA] Scoring EM / F1 / Hallucination ...")
-    records = []
-    for mid in _all_models():
-        df = _load_inference(mid, "sqa")
-        if df.empty:
-            continue
-        if smoke:
-            df = df.head(SMOKE_N)
-        for _, row in df.iterrows():
-            ref_ans   = str(row.get("answer", ""))
-            passage   = str(row.get("passage_text", ""))
-            hyp_raw   = str(row.get("raw", ""))
-            if hyp_raw == "__ERROR__":
-                continue
-                
-            em = _exact_match_score(hyp_raw, ref_ans)
-            f1 = _f1_score(hyp_raw, ref_ans)
-            hal = _hallucination_rate(hyp_raw, passage)
-            
-            records.append({
-                "model": mid,
-                "speech_id":     row.get("speech_id", ""),
-                "background_id": row.get("background_id", ""),
-                "snr_db":        row.get("snr_db", ""),
-                "condition":     row.get("condition", ""),
-                "em": round(em, 4),
-                "f1": round(f1, 4),
-                "hallucination": round(hal, 4),
-            })
-            
-    out = pd.DataFrame(records)
-    if not out.empty:
-        _save(out, "e1_sqa.csv")
-    return out
-
-
-def _score_e1_profile(smoke: bool) -> None:
+def _score_e1_profile() -> None:
     log.info("[E1-Profile] Scoring descriptor regressions ...")
     asr_f = RESULTS / "e1_asr.csv"
     if not asr_f.exists():
@@ -325,7 +249,7 @@ def _score_e1_profile(smoke: bool) -> None:
 
 # ── E2-ASR ───────────────────────────────────────────────────────────────────
 
-def score_e2(smoke: bool) -> None:
+def score_e2() -> None:
     log.info("[E2] Scoring real + TIR ...")
     bat = _load_battery()
     speech_like = (bat[bat.get("category", pd.Series()) == "speech_like"]["bg_id"].tolist()
@@ -336,8 +260,6 @@ def score_e2(smoke: bool) -> None:
         df = _load_inference(mid, "asr")
         if df.empty:
             continue
-        if smoke:
-            df = df.head(SMOKE_N * 4)
 
         clean = df[df["condition"] == "clean"]
 
@@ -365,10 +287,10 @@ def score_e2(smoke: bool) -> None:
     _save(pd.DataFrame(records), "e2_semantic.csv")
 
     # TIR
-    _score_tir(smoke)
+    _score_tir()
 
 
-def _score_tir(smoke: bool) -> None:
+def _score_tir() -> None:
     """TIR = FAR on injection probes vs generic noise."""
     pf = ROOT / "prereg" / "injection_probe_ids.json"
     if not pf.exists():
@@ -382,12 +304,9 @@ def _score_tir(smoke: bool) -> None:
         if df.empty or "speech_id" not in df.columns:
             continue
         probes = df[df["speech_id"].isin(probe_ids)]
-        if smoke:
-            probes = probes.head(SMOKE_N)
         for _, row in probes.iterrows():
             raw = str(row.get("raw", "")).lower().strip()
             predicted = raw.split()[0] if raw else ""
-            import string
             predicted = predicted.strip(string.punctuation)
             records.append({
                 "model": mid,
@@ -402,7 +321,7 @@ def _score_tir(smoke: bool) -> None:
 
 
 # ── E3: Disparate Robustness ─────────────────────────────────────────────────
-def score_e3(smoke: bool) -> None:
+def score_e3() -> None:
     log.info("[E3] Disparate-robustness scoring ...")
     asr_path = RESULTS / "e1_asr.csv"
     if not asr_path.exists():
@@ -466,7 +385,7 @@ def score_e3(smoke: bool) -> None:
 
 
 # ── E4: Steerability (RER) ───────────────────────────────────────────────────
-def score_e4(smoke: bool) -> None:
+def score_e4() -> None:
     log.info("[E4] Steerability / RER scoring ...")
     records = []
     steer_tasks = ["asr_steer", "asr_steer_p1", "asr_steer_p2", "asr_steer_p3", "asr_steer_p4", "asr_steer_p5"]
@@ -489,8 +408,6 @@ def score_e4(smoke: bool) -> None:
             if "condition" not in df.columns:
                 continue
             df_copy = df.copy()
-            if smoke:
-                df_copy = df_copy.head(SMOKE_N)
             noisy = df_copy[df_copy["condition"] == "noisy"]
             clean = (df_copy[df_copy["condition"] == "clean"]
                      [["speech_id", "raw"]].rename(columns={"raw": "raw_clean"}))
@@ -529,7 +446,7 @@ def score_e4(smoke: bool) -> None:
 
 
 # ── E4-KWS: Steerability for keyword spotting ─────────────────────────────────
-def score_e4_kws(smoke: bool) -> None:
+def score_e4_kws() -> None:
     log.info("[E4-KWS] Steerability / KWS prompt engineering scoring ...")
     records = []
     steer_tasks = ["kws_steer", "kws_steer_p1", "kws_steer_p2", "kws_steer_p3", "kws_steer_p4", "kws_steer_p5"]
@@ -550,19 +467,13 @@ def score_e4_kws(smoke: bool) -> None:
         all_evals = [(df_base, "base")] + available_steers
         for df, label in all_evals:
             df_copy = df.copy()
-            if smoke:
-                df_copy = df_copy.head(SMOKE_N)
             for _, row in df_copy.iterrows():
                 ref_kw   = str(row.get("keyword", "")).lower().strip()
                 hyp_raw  = str(row.get("raw", "")).lower().strip()
                 is_target = bool(row.get("is_target", False))
                 if hyp_raw == "__error__":
                     continue
-                hyp_kw   = hyp_raw.split()[0] if hyp_raw else "silence"
-                import string
-                hyp_kw   = hyp_kw.strip(string.punctuation)
-                correct      = (hyp_kw == ref_kw) if is_target else (hyp_kw not in KWS_TARGETS)
-                false_alarm  = (not is_target) and (hyp_kw in KWS_TARGETS)
+                hyp_kw, correct, false_alarm = _score_kws_row(ref_kw, hyp_raw, is_target)
                 records.append({
                     "model": mid,
                     "speech_id":     row.get("speech_id", ""),
@@ -590,7 +501,7 @@ def score_e4_kws(smoke: bool) -> None:
 
 
 # ── Plots (Visualizations) ───────────────────────────────────────────────────
-def plot_all_results(smoke: bool) -> None:
+def plot_all_results() -> None:
     log.info("[Plots] Generating result visualizations ...")
     try:
         import matplotlib.pyplot as plt
@@ -674,10 +585,9 @@ def plot_all_results(smoke: bool) -> None:
             plt.savefig(PLOT_DIR / "fig1b_profile_modulation_line.png")
             plt.close()
 
-        # Speech-like vs Non-speech category comparison plots (ASR, KWS, SQA)
+        # Speech-like vs Non-speech category comparison plots (ASR, KWS)
         comp_asr = pd.DataFrame()
         comp_kws = pd.DataFrame()
-        comp_sqa = pd.DataFrame()
 
         if "category" in noisy.columns:
             comp_asr = noisy[noisy["category"].isin(["speech_like", "non_speech"])].copy()
@@ -698,26 +608,10 @@ def plot_all_results(smoke: bool) -> None:
             except Exception as e:
                 log.warning(f"[Plots] Could not process KWS category comparison: {e}")
 
-        # Load and process SQA
-        sqa_f = RESULTS / "e1_sqa.csv"
-        if sqa_f.exists() and sqa_f.stat().st_size > 10:
-            try:
-                df_sqa = pd.read_csv(sqa_f)
-                if not df_sqa.empty and "condition" in df_sqa.columns:
-                    clean_sqa = df_sqa[df_sqa["condition"] == "clean"][["model", "speech_id", "f1"]].rename(columns={"f1": "f1_clean"})
-                    df_sqa = df_sqa.merge(clean_sqa, on=["model", "speech_id"], how="left")
-                    df_sqa["df1"] = df_sqa["f1"] - df_sqa["f1_clean"]
-                    # Merge with battery
-                    df_sqa = df_sqa.merge(bat, left_on="background_id", right_on="bg_id", how="inner")
-                    if "category" in df_sqa.columns:
-                        comp_sqa = df_sqa[(df_sqa["condition"] == "noisy") & (df_sqa["category"].isin(["speech_like", "non_speech"]))].copy()
-            except Exception as e:
-                log.warning(f"[Plots] Could not process SQA category comparison: {e}")
-
         # Generate the multi-column Bar plot
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
         has_bar_data = False
-        
+
         # ASR Subplot
         if not comp_asr.empty:
             sns.barplot(data=comp_asr, x="model", y="dwer", hue="category", ax=axes[0])
@@ -727,7 +621,7 @@ def plot_all_results(smoke: bool) -> None:
             has_bar_data = True
         else:
             axes[0].text(0.5, 0.5, "No ASR Data", ha="center", va="center")
-            
+
         # KWS Subplot
         if not comp_kws.empty:
             sns.barplot(data=comp_kws, x="model", y="dacc", hue="category", ax=axes[1])
@@ -738,26 +632,16 @@ def plot_all_results(smoke: bool) -> None:
         else:
             axes[1].text(0.5, 0.5, "No KWS Data", ha="center", va="center")
 
-        # SQA Subplot
-        if not comp_sqa.empty:
-            sns.barplot(data=comp_sqa, x="model", y="df1", hue="category", ax=axes[2])
-            axes[2].set_title("SQA Task: Mean ΔF1 Score\n(Higher/Near 0 is Better)")
-            axes[2].set_ylabel("ΔF1 (noisy - clean)")
-            axes[2].tick_params(axis='x', rotation=45)
-            has_bar_data = True
-        else:
-            axes[2].text(0.5, 0.5, "No SQA Data", ha="center", va="center")
-
         if has_bar_data:
-            plt.suptitle("E1 Robustness: Speech-like vs Non-speech Noise across ASR, KWS, and SQA", fontsize=14, y=0.98)
+            plt.suptitle("E1 Robustness: Speech-like vs Non-speech Noise across ASR and KWS", fontsize=14, y=0.98)
             plt.tight_layout()
             plt.savefig(PLOT_DIR / "e1_speech_vs_non_speech_bar.png")
             plt.close()
 
         # Generate the multi-column Box plot
-        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
         has_box_data = False
-        
+
         # ASR Subplot
         if not comp_asr.empty:
             sns.boxplot(data=comp_asr, x="model", y="dwer", hue="category", ax=axes[0])
@@ -767,7 +651,7 @@ def plot_all_results(smoke: bool) -> None:
             has_box_data = True
         else:
             axes[0].text(0.5, 0.5, "No ASR Data", ha="center", va="center")
-            
+
         # KWS Subplot
         if not comp_kws.empty:
             sns.boxplot(data=comp_kws, x="model", y="dacc", hue="category", ax=axes[1])
@@ -778,18 +662,8 @@ def plot_all_results(smoke: bool) -> None:
         else:
             axes[1].text(0.5, 0.5, "No KWS Data", ha="center", va="center")
 
-        # SQA Subplot
-        if not comp_sqa.empty:
-            sns.boxplot(data=comp_sqa, x="model", y="df1", hue="category", ax=axes[2])
-            axes[2].set_title("SQA Task: ΔF1 Distribution")
-            axes[2].set_ylabel("ΔF1 (noisy - clean)")
-            axes[2].tick_params(axis='x', rotation=45)
-            has_box_data = True
-        else:
-            axes[2].text(0.5, 0.5, "No SQA Data", ha="center", va="center")
-
         if has_box_data:
-            plt.suptitle("E1 Robustness Distribution: Speech-like vs Non-speech Noise across ASR, KWS, and SQA", fontsize=14, y=0.98)
+            plt.suptitle("E1 Robustness Distribution: Speech-like vs Non-speech Noise across ASR and KWS", fontsize=14, y=0.98)
             plt.tight_layout()
             plt.savefig(PLOT_DIR / "e1_speech_vs_non_speech_box.png")
             plt.close()
@@ -979,7 +853,7 @@ def plot_all_results(smoke: bool) -> None:
 
 
 # ── Summary Table (proposal Table 1) ─────────────────────────────────────────
-def build_summary(smoke: bool) -> None:
+def build_summary() -> None:
     log.info("[Summary] Building headline table ...")
     rows = []
     asr_f = RESULTS / "e1_asr.csv"
@@ -1019,25 +893,19 @@ def build_summary(smoke: bool) -> None:
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 6 — Score all metrics")
-    ap.add_argument("--smoke-test", action="store_true",
-                    help=f"Score only {SMOKE_N} rows per scorer.")
-    args = ap.parse_args()
-
-    if args.smoke_test:
-        log.info("=== SMOKE TEST MODE ===")
+    ap.parse_args()
 
     RESULTS.mkdir(parents=True, exist_ok=True)
 
-    score_e1_asr(smoke=args.smoke_test)
-    score_e1_kws(smoke=args.smoke_test)
-    score_e1_sqa(smoke=args.smoke_test)
-    _score_e1_profile(smoke=args.smoke_test)
-    score_e2(smoke=args.smoke_test)
-    score_e3(smoke=args.smoke_test)
-    score_e4(smoke=args.smoke_test)
-    score_e4_kws(smoke=args.smoke_test)
-    build_summary(smoke=args.smoke_test)
-    plot_all_results(smoke=args.smoke_test)
+    score_e1_asr()
+    score_e1_kws()
+    _score_e1_profile()
+    score_e2()
+    score_e3()
+    score_e4()
+    score_e4_kws()
+    build_summary()
+    plot_all_results()
 
     log.info("=== Stage 6 complete. Results in results/ ===")
 

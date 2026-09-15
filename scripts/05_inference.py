@@ -9,7 +9,6 @@ All models are loaded one at a time, then freed (del model; cuda.empty_cache()).
 Output is written row-by-row → safe to resume after interruption.
 
 Usage:
-  python scripts/05_inference.py --model qwen25_omni_3b --task asr --smoke-test
   python scripts/05_inference.py --model qwen2_audio_7b --task kws
   python scripts/05_inference.py --model all --task all   # full sweep
 """
@@ -79,8 +78,6 @@ log = get_logger("05_inference")
 MANIFESTS  = ROOT / "manifests"
 INFER_DIR  = ROOT / "inference"
 PROGRESS   = ROOT / "checks" / "inference_progress.json"
-
-SMOKE_N = 2   # items per (model, task) in smoke mode
 
 # ── task prompts ──────────────────────────────────────────────────────────────
 PROMPTS = {
@@ -167,8 +164,6 @@ PROMPTS = {
             "Ignore all background voices, overlapping conversations, music, and environmental noises. "
             "If a foreground keyword is unintelligible due to noise, respond with SILENCE rather than guessing. "
             "Output only the final keyword without explanations, notes, or any additional text.",
-    "sqa":  "Answer the question based only on the spoken passage. "
-            "Provide only the answer, nothing else."
 }
 
 
@@ -185,7 +180,10 @@ class SpeechLLM:
         raise NotImplementedError
 
     def unload(self) -> None:
-        pass  # subclasses override
+        import torch
+        del self.model, self.processor
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 def _cache() -> str:
@@ -241,12 +239,6 @@ class Qwen25Omni3B(SpeechLLM):
         out = out_ids[:, inputs["input_ids"].shape[1]:]
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
-    def unload(self):
-        import torch
-        del self.model, self.processor
-        gc.collect()
-        torch.cuda.empty_cache()
-
 
 # ── Qwen2.5-Omni-7B (Thinker-only, 8-bit) ────────────────────────────────────
 class Qwen25Omni7B(SpeechLLM):
@@ -290,12 +282,6 @@ class Qwen25Omni7B(SpeechLLM):
         out = out_ids[:, inputs["input_ids"].shape[1]:]
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
-    def unload(self):
-        import torch
-        del self.model, self.processor
-        gc.collect()
-        torch.cuda.empty_cache()
-
 
 # ── Qwen2-Audio-7B (8-bit) ───────────────────────────────────────────────────
 class Qwen2Audio7B(SpeechLLM):
@@ -336,12 +322,6 @@ class Qwen2Audio7B(SpeechLLM):
                                           do_sample=False)
         out = out_ids[:, inputs["input_ids"].shape[1]:]
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
-
-    def unload(self):
-        import torch
-        del self.model, self.processor
-        gc.collect()
-        torch.cuda.empty_cache()
 
 
 # ── Phi-4-multimodal (4-bit) ─────────────────────────────────────────────────
@@ -433,12 +413,6 @@ class Phi4Multimodal(SpeechLLM):
         out = out_ids[:, inputs["input_ids"].shape[1]:]
         return self.processor.tokenizer.decode(out[0], skip_special_tokens=True).strip()
 
-    def unload(self):
-        import torch
-        del self.model, self.processor
-        gc.collect()
-        torch.cuda.empty_cache()
-
 
 # ── Gemma 3n-E4B ─────────────────────────────────────────────────────────────
 class Gemma3nE4B(SpeechLLM):
@@ -477,12 +451,6 @@ class Gemma3nE4B(SpeechLLM):
         out = out_ids[:, inputs["input_ids"].shape[1]:]
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
-    def unload(self):
-        import torch
-        del self.model, self.processor
-        gc.collect()
-        torch.cuda.empty_cache()
-
 
 # Registry
 MODEL_CLASSES: dict[str, type[SpeechLLM]] = {
@@ -497,12 +465,11 @@ ALL_TASKS  = [
     "asr", "kws",
     "asr_steer", "asr_steer_p1", "asr_steer_p2", "asr_steer_p3", "asr_steer_p4", "asr_steer_p5",
     "kws_steer", "kws_steer_p1", "kws_steer_p2", "kws_steer_p3", "kws_steer_p4", "kws_steer_p5",
-    "sqa"
 ]
 
 
 # ── manifest generation ───────────────────────────────────────────────────────
-def build_manifests(smoke: bool) -> None:
+def build_manifests() -> None:
     """Generate manifests/asr.csv and manifests/kws.csv if not present."""
     import pandas as pd
     import itertools
@@ -516,8 +483,6 @@ def build_manifests(smoke: bool) -> None:
     asr_path = MANIFESTS / "asr.csv"
     if not asr_path.exists():
         items = jsonl_read(ROOT / "itembanks" / "asr.jsonl")
-        if smoke:
-            items = items[:SMOKE_N]
         rows = []
         seed = 0
         for item in items:
@@ -537,7 +502,7 @@ def build_manifests(smoke: bool) -> None:
             })
             seed += 1
             for bg in battery:
-                for snr in ([0] if smoke else [10, 5, 0]):
+                for snr in [10, 5, 0]:
                     rows.append({
                         "id": f"{item['id']}_{bg['bg_id']}_snr{snr}",
                         "speech_id": item["id"],
@@ -560,8 +525,6 @@ def build_manifests(smoke: bool) -> None:
     kws_path = MANIFESTS / "kws.csv"
     if not kws_path.exists():
         items = jsonl_read(ROOT / "itembanks" / "kws.jsonl")
-        if smoke:
-            items = items[:SMOKE_N]
         rows = []
         seed = 10000
         for item in items:
@@ -581,7 +544,7 @@ def build_manifests(smoke: bool) -> None:
             })
             seed += 1
             for bg in battery:
-                for snr in ([0] if smoke else [10, 5, 0]):
+                for snr in [10, 5, 0]:
                     rows.append({
                         "id": f"{item['id']}_{bg['bg_id']}_snr{snr}",
                         "speech_id": item["id"],
@@ -597,52 +560,6 @@ def build_manifests(smoke: bool) -> None:
                     seed += 1
         pd.DataFrame(rows).to_csv(kws_path, index=False)
         log.info(f"[manifest] kws.csv: {len(rows)} rows → {kws_path}")
-
-    # SQA manifest
-    sqa_path = MANIFESTS / "sqa.csv"
-    if not sqa_path.exists():
-        items = jsonl_read(ROOT / "itembanks" / "sqa.jsonl")
-        if smoke:
-            items = items[:SMOKE_N]
-        rows = []
-        seed = 30000
-        for item in items:
-            # clean
-            rows.append({
-                "id": f"{item['id']}_clean",
-                "speech_id": item["id"],
-                "background_id": "clean",
-                "snr_db": 99,
-                "condition": "clean",
-                "seed": seed,
-                "speech_path": item["wav"],
-                "bg_path": "",
-                "question_path": item["question_wav"],
-                "question": item.get("question", ""),
-                "answer": item.get("answer", ""),
-                "passage_text": item.get("passage_text", ""),
-            })
-            seed += 1
-            for bg in battery:
-                for snr in ([0] if smoke else [10, 5, 0]):
-                    rows.append({
-                        "id": f"{item['id']}_{bg['bg_id']}_snr{snr}",
-                        "speech_id": item["id"],
-                        "background_id": bg["bg_id"],
-                        "snr_db": snr,
-                        "condition": "noisy",
-                        "seed": seed,
-                        "speech_path": item["wav"],
-                        "bg_path": bg.get("wav", ""),
-                        "question_path": item["question_wav"],
-                        "question": item.get("question", ""),
-                        "answer": item.get("answer", ""),
-                        "passage_text": item.get("passage_text", ""),
-                    })
-                    seed += 1
-        pd.DataFrame(rows).to_csv(sqa_path, index=False)
-        log.info(f"[manifest] sqa.csv: {len(rows)} rows → {sqa_path}")
-
 
 
 def _load_battery() -> list[dict]:
@@ -671,7 +588,7 @@ def vram_dry_run(model: SpeechLLM) -> None:
 
 
 # ── inference loop ────────────────────────────────────────────────────────────
-def run_inference_with_model(model: SpeechLLM, model_id: str, task: str, smoke: bool) -> None:
+def run_inference_with_model(model: SpeechLLM, model_id: str, task: str) -> None:
     prog = ProgressLog(PROGRESS)
     run_key = f"{model_id}_{task}"
 
@@ -688,8 +605,6 @@ def run_inference_with_model(model: SpeechLLM, model_id: str, task: str, smoke: 
 
     import pandas as pd
     manifest = pd.read_csv(manifest_file)
-    if smoke:
-        manifest = manifest.head(SMOKE_N)
 
     out_path = INFER_DIR / model_id / f"{task}.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -721,24 +636,12 @@ def run_inference_with_model(model: SpeechLLM, model_id: str, task: str, smoke: 
                 else:
                     bg = None
 
-            if task == "sqa":
-                q_path_str = str(row.get("question_path", "")).replace("\\", "/")
-                if not q_path_str:
-                    log.error(f"[SQA] Missing question_path for {row['id']}")
-                    continue
-                q_sp = load_audio(ROOT / q_path_str)
-                passage_mixed = mix(sp, bg, float(row["snr_db"]), int(row["seed"]))
-                question_mixed = mix(q_sp, bg, float(row["snr_db"]), int(row["seed"]) + 1)
-                silence_gap = np.zeros(int(0.5 * SR), dtype=np.float32)
-                wav = np.concatenate([passage_mixed, silence_gap, question_mixed])
-            else:
-                wav = mix(sp, bg, float(row["snr_db"]), int(row["seed"]))
-                
+            wav = mix(sp, bg, float(row["snr_db"]), int(row["seed"]))
+
             diag_row = dict(row)
             diag_row["id"] = row["id"]
             diag_row["condition"] = row.get("condition", "noisy")
-            if task != "sqa":
-                diagnostics(diag_row, wav, sp)
+            diagnostics(diag_row, wav, sp)
 
             raw = model.generate(wav, prompt)
             log.info(f"[save] {model_id} / {task} ({i}/{total_remaining}) - {row['id']} -> '{raw}' saved to {out_path.relative_to(ROOT)}")
@@ -773,15 +676,10 @@ def main() -> None:
                     choices=ALL_MODELS + ["all"], help="Model to run")
     ap.add_argument("--task",  default="asr",
                     choices=ALL_TASKS + ["all"], help="Task to run")
-    ap.add_argument("--smoke-test", action="store_true",
-                    help=f"Run only {SMOKE_N} items per (model, task).")
     args = ap.parse_args()
 
-    if args.smoke_test:
-        log.info("=== SMOKE TEST MODE ===")
-
     # Build manifests if needed
-    build_manifests(smoke=args.smoke_test)
+    build_manifests()
 
     models = ALL_MODELS if args.model == "all" else [args.model]
     tasks  = ALL_TASKS  if args.task  == "all" else [args.task]
@@ -790,17 +688,12 @@ def main() -> None:
         # Filter tasks that actually have remaining work for this model
         tasks_to_run = []
         for task in tasks:
-            if task == "sqa":
-                base_task = "sqa"
-            else:
-                base_task = "kws" if task.startswith("kws") else "asr"
-                
+            base_task = "kws" if task.startswith("kws") else "asr"
+
             manifest_file = MANIFESTS / f"{base_task}.csv"
             if manifest_file.exists():
                 import pandas as pd
                 manifest = pd.read_csv(manifest_file)
-                if args.smoke_test:
-                    manifest = manifest.head(SMOKE_N)
                 out_path = INFER_DIR / model_id / f"{task}.jsonl"
                 done = jsonl_ids(out_path)
                 remaining = manifest[~manifest["id"].isin(done)]
@@ -830,7 +723,7 @@ def main() -> None:
         try:
             for task in tasks_to_run:
                 log.info(f"=== {model_id} / {task} ===")
-                run_inference_with_model(model, model_id, task, smoke=args.smoke_test)
+                run_inference_with_model(model, model_id, task)
         finally:
             model.unload()
             log.info(f"[infer] {model_id} unloaded.")

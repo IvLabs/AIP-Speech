@@ -15,9 +15,7 @@ Corpora:
   (Common Voice is STREAMED at inference, not downloaded)
 
 Usage:
-  python scripts/01_download.py              # full run
-  python scripts/01_download.py --smoke-test # small subset to verify connectivity + logic
-  python scripts/01_download.py --resume     # skip already-done items (default behaviour)
+  python scripts/01_download.py              # full run (resumable)
 """
 from __future__ import annotations
 
@@ -96,7 +94,7 @@ def extract_tar(archive: Path, out_dir: Path) -> None:
 
 # ── corpus-specific download functions ───────────────────────────────────────
 
-def download_esc50(prog: ProgressLog, smoke: bool) -> None:
+def download_esc50(prog: ProgressLog) -> None:
     """ESC-50: 2000 clips (5 s, 44.1 kHz) — ~600 MB unzipped."""
     key = "esc50"
     if prog.done(key):
@@ -106,13 +104,6 @@ def download_esc50(prog: ProgressLog, smoke: bool) -> None:
     url = "https://github.com/karoldvl/ESC-50/archive/master.zip"
     archive = DATA / "esc50_master.zip"
     download(url, archive, "ESC-50")
-    if smoke:
-        # Just validate the archive is readable; don't fully extract
-        with zipfile.ZipFile(archive) as z:
-            names = z.namelist()
-        log.info(f"[smoke] ESC-50 archive OK — {len(names)} entries.")
-        prog.mark(key)
-        return
     dest.mkdir(parents=True, exist_ok=True)
     extract_zip(archive, dest)
     prog.mark(key)
@@ -123,7 +114,7 @@ def download_esc50(prog: ProgressLog, smoke: bool) -> None:
 # SPSQUARE and TCAR are not in this Zenodo record; substituting with similar envs.
 MS_SNSD_GIT = "https://github.com/microsoft/MS-SNSD.git"
 
-def download_ms_snsd(prog: ProgressLog, smoke: bool) -> None:
+def download_ms_snsd(prog: ProgressLog) -> None:
     """
     MS-SNSD (Microsoft Scalable Noisy Speech Dataset).
     Noise WAVs land in data/ms_snsd/noise_train/ (~400 MB).
@@ -136,20 +127,6 @@ def download_ms_snsd(prog: ProgressLog, smoke: bool) -> None:
         return
 
     dest = DATA / "ms_snsd"
-
-    if smoke:
-        # Just verify git is reachable; don't clone the whole repo
-        log.info("[smoke] MS-SNSD — checking git connectivity...")
-        result = subprocess.run(
-            ["git", "ls-remote", "--exit-code", "--heads", MS_SNSD_GIT],
-            capture_output=True, timeout=30,
-        )
-        if result.returncode == 0:
-            log.info("[smoke] MS-SNSD git remote reachable ✓")
-        else:
-            log.warning(f"[smoke] MS-SNSD git remote unreachable: {result.stderr.decode().strip()}")
-        prog.mark(key)
-        return
 
     if (dest / "noise_train").exists() and any((dest / "noise_train").glob("*.wav")):
         log.info("[skip] MS-SNSD noise_train/ already populated.")
@@ -177,7 +154,7 @@ NOISEX_FILES = [
     "pink.wav", "volvo.wav", "white.wav",
 ]
 
-def download_noisex(prog: ProgressLog, smoke: bool) -> None:
+def download_noisex(prog: ProgressLog) -> None:
     """NOISEX-92: all 15 noise files (~130 MB total) from speechdnn/Noises GitHub mirror."""
     key = "noisex_babble"
     if prog.done(key):
@@ -185,15 +162,14 @@ def download_noisex(prog: ProgressLog, smoke: bool) -> None:
         return
     dest_dir = DATA / "noisex"
     dest_dir.mkdir(parents=True, exist_ok=True)
-    files_to_get = ["babble.wav"] if smoke else NOISEX_FILES
-    for fname in files_to_get:
+    for fname in NOISEX_FILES:
         url = f"{_NOISEX_BASE}/{fname}"
         download(url, dest_dir / fname, f"NOISEX-92/{fname}")
     prog.mark(key)
-    log.info(f"[done] NOISEX-92 ({len(files_to_get)} files)")
+    log.info(f"[done] NOISEX-92 ({len(NOISEX_FILES)} files)")
 
 
-def download_musan(prog: ProgressLog, smoke: bool) -> None:
+def download_musan(prog: ProgressLog) -> None:
     """MUSAN: speech + music + noise subsets (~10 GB full; we only keep subsets)."""
     key = "musan"
     if prog.done(key):
@@ -202,10 +178,6 @@ def download_musan(prog: ProgressLog, smoke: bool) -> None:
     dest_dir = DATA / "musan"
     url = "https://www.openslr.org/resources/17/musan.tar.gz"
     archive = dest_dir / "musan.tar.gz"
-    if smoke:
-        log.info("[smoke] MUSAN — skipping full download (large). Archive URL noted.")
-        prog.mark(key)
-        return
     download(url, archive, "MUSAN")
     extract_tar(archive, dest_dir)
     prog.mark(key)
@@ -217,10 +189,9 @@ LIBRISPEECH_URLS = {
     "test-other": "https://www.openslr.org/resources/12/test-other.tar.gz",
 }
 
-def download_librispeech(prog: ProgressLog, smoke: bool) -> None:
+def download_librispeech(prog: ProgressLog) -> None:
     """LibriSpeech test-clean + test-other (~400 MB total)."""
-    splits = ["test-clean"] if smoke else list(LIBRISPEECH_URLS.keys())
-    for split in splits:
+    for split in LIBRISPEECH_URLS:
         key = f"librispeech_{split}"
         if prog.done(key):
             log.info(f"[skip] LibriSpeech {split} already done.")
@@ -228,18 +199,12 @@ def download_librispeech(prog: ProgressLog, smoke: bool) -> None:
         dest_dir = DATA / "speech_asr"
         archive = dest_dir / f"{split}.tar.gz"
         download(LIBRISPEECH_URLS[split], archive, f"LibriSpeech/{split}")
-        if smoke:
-            with tarfile.open(archive) as t:
-                members = t.getmembers()
-            log.info(f"[smoke] LibriSpeech {split} archive OK — {len(members)} members.")
-            prog.mark(key)
-            continue
         extract_tar(archive, dest_dir)
         prog.mark(key)
     log.info("[done] LibriSpeech")
 
 
-def download_speech_commands(prog: ProgressLog, smoke: bool) -> None:
+def download_speech_commands(prog: ProgressLog) -> None:
     """Google Speech Commands v2 (~2.3 GB; only downloading v2 mini)."""
     key = "speech_commands_v2"
     if prog.done(key):
@@ -249,10 +214,6 @@ def download_speech_commands(prog: ProgressLog, smoke: bool) -> None:
     # Full dataset
     url = "https://storage.googleapis.com/download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
     archive = dest_dir / "speech_commands_v2.tar.gz"
-    if smoke:
-        log.info("[smoke] Speech Commands — skipping download (large). URL noted.")
-        prog.mark(key)
-        return
     download(url, archive, "Speech Commands v2")
     extract_tar(archive, dest_dir)
     prog.mark(key)
@@ -262,26 +223,18 @@ def download_speech_commands(prog: ProgressLog, smoke: bool) -> None:
 # ── main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 1 — Download source corpora")
-    ap.add_argument("--smoke-test", action="store_true",
-                    help="Run a small subset to verify connectivity and logic.")
-    args = ap.parse_args()
-    smoke = args.smoke_test
-
-    if smoke:
-        log.info("=== SMOKE TEST MODE — small subset only ===")
+    ap.parse_args()
 
     prog = ProgressLog(PROGRESS)
 
-    download_esc50(prog, smoke)
-    download_ms_snsd(prog, smoke)
-    download_noisex(prog, smoke)
-    download_musan(prog, smoke)
-    download_librispeech(prog, smoke)
-    download_speech_commands(prog, smoke)
+    download_esc50(prog)
+    download_ms_snsd(prog)
+    download_noisex(prog)
+    download_musan(prog)
+    download_librispeech(prog)
+    download_speech_commands(prog)
 
     log.info(f"=== Stage 1 complete. {len(prog)} items marked done. ===")
-    if smoke:
-        log.info("Re-run WITHOUT --smoke-test for the full download.")
 
 
 if __name__ == "__main__":

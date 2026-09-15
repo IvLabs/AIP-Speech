@@ -104,18 +104,16 @@ secrets = [hf_secret] if hf_secret else []
     },
     secrets=secrets,
 )
-def run_inference(smoke_test: bool = False, model: str = "all", task: str = "all"):
+def run_inference(model: str = "all", task: str = "all"):
     import sys
     import time
-    
+
     # Change working directory to the workspace
     os.chdir("/workspace")
-    
+
     # Build the command string
     cmd = ["python", "scripts/05_inference.py", "--model", model, "--task", task]
-    if smoke_test:
-        cmd.append("--smoke-test")
-        
+
     print(f"Running command: {' '.join(cmd)}")
     
     # Execute the underlying script and stream output
@@ -142,15 +140,15 @@ def run_inference(smoke_test: bool = False, model: str = "all", task: str = "all
         print("Inference completed successfully!")
 
 @app.local_entrypoint()
-def main(smoke_test: bool = False, model: str = "all", task: str = "all"):
+def main(model: str = "all", task: str = "all"):
     import time
     import threading
     import subprocess
-    
+
     timestamp = int(time.time())
     # Create a unique folder for this run's sync to avoid touching or overwriting other models' local data
     sync_dir = f"inference_sync_{model}_{timestamp}"
-    print(f"Starting Modal run on L4 GPU. smoke_test={smoke_test}, model={model}, task={task}")
+    print(f"Starting Modal run on L4 GPU. model={model}, task={task}")
     print(f"Local sync directory for this run: {sync_dir}/")
     
     def sync_volume():
@@ -173,7 +171,7 @@ def main(smoke_test: bool = False, model: str = "all", task: str = "all"):
     
     # Run the modal function (this will block until it finishes)
     try:
-        run_inference.remote(smoke_test, model, task)
+        run_inference.remote(model, task)
     finally:
         # One final sync after it finishes or errors
         print("Run finished or interrupted. Final sync...")

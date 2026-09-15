@@ -138,41 +138,6 @@ def load_kws_data():
     return df
 
 
-def load_sqa_data():
-    csv_p = RESULTS_DIR / "e1_sqa.csv"
-    if csv_p.exists():
-        df = pd.read_csv(csv_p)
-    else:
-        rows = []
-        for m in MODELS:
-            jf = RESULTS_DIR / m / "sqa.jsonl"
-            if jf.exists():
-                for line in open(jf, encoding="utf-8"):
-                    if line.strip():
-                        try:
-                            d = json.loads(line)
-                            d["model"] = m
-                            rows.append(d)
-                        except:
-                            pass
-        df = pd.DataFrame(rows)
-    
-    if "bg_id" not in df.columns and "background_id" in df.columns:
-        df["bg_id"] = df["background_id"]
-        
-    df["category"] = df["bg_id"].map(BG_CATEGORY_MAP)
-    
-    if "f1_clean" not in df.columns:
-        clean = df[df["condition"] == "clean"][["model", "speech_id", "f1"]].rename(columns={"f1": "f1_clean"})
-        df = df.merge(clean, on=["model", "speech_id"], how="left")
-    
-    # Delta = Noisy - Clean
-    if "f1" in df.columns and "f1_clean" in df.columns:
-        df["df1"] = df["f1"] - df["f1_clean"]
-        
-    return df
-
-
 def compute_dri(df, group_col, category_col):
     results = []
     for (model, cat), group in df.groupby(["model", category_col]):
@@ -325,59 +290,6 @@ def plot_line_dri_speech_vs_noise(asr_df):
     print(f"Generated {out.name}")
 
 
-def plot_bar_sqa_f1_clean_vs_noisy(sqa_df):
-    if sqa_df.empty or "f1" not in sqa_df.columns: return
-    plt.figure(figsize=(12, 8))
-    sns.barplot(data=sqa_df, x="model", y="f1", hue="condition", errorbar=None)
-    plt.title("SQA: Mean F1 Score (Clean vs Noisy Baseline)", pad=20)
-    plt.ylabel("F1 Score")
-    plt.xlabel("Model")
-    plt.xticks(rotation=45, ha='right')
-    plt.legend(title="Condition", bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-    plt.tight_layout()
-    out = NEW_PLOTS_DIR / "bar_sqa_f1_clean_vs_noisy.png"
-    plt.savefig(out, dpi=300)
-    plt.close()
-    print(f"Generated {out.name}")
-
-
-def plot_line_sqa_f1_vs_snr(sqa_df):
-    if sqa_df.empty or "snr_db" not in sqa_df.columns: return
-    noisy = sqa_df[sqa_df["snr_db"].notnull() & (sqa_df["condition"] == "noisy")]
-    if noisy.empty: return
-    plt.figure(figsize=(12, 8))
-    sns.lineplot(data=noisy, x="snr_db", y="f1", hue="model", marker="o", linewidth=2.5, markersize=10)
-    plt.title("SQA: F1 Score across Signal-to-Noise Ratios (SNR)", pad=20)
-    plt.ylabel("F1 Score")
-    plt.xlabel("SNR (dB)")
-    plt.gca().invert_xaxis()
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-    plt.tight_layout()
-    out = NEW_PLOTS_DIR / "line_sqa_f1_vs_snr.png"
-    plt.savefig(out, dpi=300)
-    plt.close()
-    print(f"Generated {out.name}")
-
-
-def plot_bar_sqa_f1_speech_vs_noise(sqa_df):
-    if sqa_df.empty or "df1" not in sqa_df.columns: return
-    noisy = sqa_df[sqa_df["condition"] == "noisy"]
-    comp = noisy[noisy["category"].isin(["speech_like", "non_speech"])]
-    if comp.empty: return
-    plt.figure(figsize=(12, 8))
-    sns.barplot(data=comp, x="model", y="df1", hue="category", errorbar=None, palette=PALETTE_CAT)
-    plt.title("SQA: Mean ΔF1 by Noise Type (Noisy - Clean)", pad=20)
-    plt.ylabel("ΔF1 (Noisy - Clean)")
-    plt.xlabel("Model")
-    plt.xticks(rotation=45, ha='right')
-    plt.legend(title="Noise Category", bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
-    plt.tight_layout()
-    out = NEW_PLOTS_DIR / "bar_sqa_f1_speech_vs_noise.png"
-    plt.savefig(out, dpi=300)
-    plt.close()
-    print(f"Generated {out.name}")
-
-
 def plot_bar_silero_vad_speech_vs_nonspeech(asr_df):
     if "speech_likeness" not in asr_df.columns or "bg_id" not in asr_df.columns: return
     df_bg = asr_df.groupby("bg_id").agg({
@@ -402,7 +314,7 @@ def plot_bar_silero_vad_speech_vs_nonspeech(asr_df):
     print(f"Generated {out.name}")
 
 
-def plot_holistic_and_task_degradations(asr_df, kws_df, sqa_df):
+def plot_holistic_and_task_degradations(asr_df, kws_df):
     # Prepare ASR (dwer = noisy - clean; higher positive dwer = worse performance)
     df_asr = asr_df[asr_df['snr_db'] == 0].copy()
     if df_asr.empty: return
@@ -422,16 +334,6 @@ def plot_holistic_and_task_degradations(asr_df, kws_df, sqa_df):
     df_kws['task'] = 'KWS'
     df_kws['dataset'] = 'KWS_Dataset'
 
-    # Prepare SQA (df1 = noisy - clean; -df1 = clean - noisy, higher positive = worse performance)
-    df_sqa = sqa_df[(sqa_df['condition'] == 'noisy') & (sqa_df['snr_db'] == 0)].copy() if not sqa_df.empty else pd.DataFrame()
-    if not df_sqa.empty:
-        if 'bg_id' not in df_sqa.columns and 'background_id' in df_sqa.columns:
-            df_sqa['bg_id'] = df_sqa['background_id']
-        df_sqa['bg_class'] = df_sqa['bg_id']
-        df_sqa['degradation'] = -df_sqa['df1'] if 'df1' in df_sqa.columns else 0
-        df_sqa['task'] = 'SQA'
-        df_sqa['dataset'] = 'SQA_Dataset'
-
     cols_to_keep = ['task', 'model', 'dataset', 'gender', 'accent', 'bg_class', 'degradation']
 
     def extract_cols(d):
@@ -443,9 +345,8 @@ def plot_holistic_and_task_degradations(asr_df, kws_df, sqa_df):
 
     df_a = extract_cols(df_asr)
     df_k = extract_cols(df_kws)
-    df_s = extract_cols(df_sqa)
 
-    combined = pd.concat([df_a, df_k, df_s], ignore_index=True)
+    combined = pd.concat([df_a, df_k], ignore_index=True)
     if combined.empty: return
 
     buckets = ['task', 'model', 'dataset', 'gender', 'accent']
@@ -471,7 +372,7 @@ def plot_holistic_and_task_degradations(asr_df, kws_df, sqa_df):
 
     draw_bg_plot(
         combined,
-        "Holistic Background Degradation Score (Averaged across ASR, KWS, SQA at 0 dB)\nNormalized across Task, Model, Dataset, Gender, Accent",
+        "Holistic Background Degradation Score (Averaged across ASR, KWS at 0 dB)\nNormalized across Task, Model, Dataset, Gender, Accent",
         "e1_holistic_bg_degradation.png"
     )
 
@@ -487,22 +388,14 @@ def plot_holistic_and_task_degradations(asr_df, kws_df, sqa_df):
         "e1_kws_bg_degradation.png"
     )
 
-    if not df_s.empty:
-        draw_bg_plot(
-            combined[combined['task'] == 'SQA'],
-            "SQA Background Degradation Score (at 0 dB SNR)\nNormalized across Model, Gender, Accent",
-            "e1_sqa_bg_degradation.png"
-        )
-
 
 def main():
     set_paper_style()
     print("Loading datasets from results...")
     asr_df = load_asr_data()
     kws_df = load_kws_data()
-    sqa_df = load_sqa_data()
 
-    print(f"ASR records: {len(asr_df)}, KWS records: {len(kws_df)}, SQA records: {len(sqa_df)}")
+    print(f"ASR records: {len(asr_df)}, KWS records: {len(kws_df)}")
 
     # Save CSV files with delta = noisy - clean in plots_new
     asr_df.to_csv(NEW_PLOTS_DIR / "asr_results.csv", index=False)
@@ -517,11 +410,8 @@ def main():
     plot_bar_kws_acc_vs_accents(kws_df)
     plot_bar_kws_acc_vs_gender(kws_df)
     plot_line_dri_speech_vs_noise(asr_df)
-    plot_bar_sqa_f1_clean_vs_noisy(sqa_df)
-    plot_line_sqa_f1_vs_snr(sqa_df)
-    plot_bar_sqa_f1_speech_vs_noise(sqa_df)
     plot_bar_silero_vad_speech_vs_nonspeech(asr_df)
-    plot_holistic_and_task_degradations(asr_df, kws_df, sqa_df)
+    plot_holistic_and_task_degradations(asr_df, kws_df)
 
     print(f"\nSuccessfully generated all plots in: {NEW_PLOTS_DIR}")
 

@@ -45,6 +45,5 @@
     "TIR": "FAR specifically on injection-probe backgrounds",
     "DRI": "(max_g DWER_g - min_g DWER_g) / mean DWER",
     "RER": "effect_with_instruction / effect_without"
-  },
-  "smoke_mode": false
+  }
 }

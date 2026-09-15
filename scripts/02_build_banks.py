@@ -10,7 +10,6 @@ All audio paths are RELATIVE to ROOT so the project is portable.
 Common Voice is STREAMED (never written to disk).
 
 Usage:
-  python scripts/02_build_banks.py --smoke-test   # 5 items per bank
   python scripts/02_build_banks.py                # full run (resumable)
 """
 from __future__ import annotations
@@ -38,7 +37,6 @@ RANDOM_SEED = 42
 ASR_N   = 100
 CV_N    = 80
 KWS_N   = 120
-SMOKE_N = 5  # items per bank in smoke mode
 
 # KWS target keywords from Google Speech Commands v2
 KWS_TARGETS = [
@@ -48,7 +46,7 @@ KWS_TARGETS = [
 
 
 # ── LibriSpeech → asr.jsonl ──────────────────────────────────────────────────
-def build_asr_bank(prog: ProgressLog, n: int) -> None:
+def build_asr_bank(prog: ProgressLog) -> None:
     key = "asr_bank"
     if prog.done(key):
         log.info("[skip] ASR bank already built.")
@@ -100,14 +98,13 @@ def build_asr_bank(prog: ProgressLog, n: int) -> None:
     # Balance across splits
     rng = random.Random(RANDOM_SEED)
     rng.shuffle(items)
-    for item in items[:n]:
+    for item in items[:ASR_N]:
         if item["id"] not in done_ids:
             jsonl_append(ASR_BANK, item)
             done_ids.add(item["id"])
 
     # Supplement with Common Voice (streamed) to get accent/gender diversity
-    cv_target = CV_N if n == ASR_N else SMOKE_N
-    _augment_asr_with_cv(done_ids, len(done_ids) + cv_target, prog)
+    _augment_asr_with_cv(done_ids, len(done_ids) + CV_N, prog)
     prog.mark(key)
     log.info(f"[done] ASR bank: {len(jsonl_ids(ASR_BANK))} items.")
 
@@ -166,7 +163,7 @@ def _augment_asr_with_cv(done_ids: set, target: int, prog: ProgressLog) -> None:
 
 
 # ── Speech Commands → kws.jsonl ──────────────────────────────────────────────
-def build_kws_bank(prog: ProgressLog, n: int) -> None:
+def build_kws_bank(prog: ProgressLog) -> None:
     key = "kws_bank"
     if prog.done(key):
         log.info("[skip] KWS bank already built.")
@@ -181,7 +178,7 @@ def build_kws_bank(prog: ProgressLog, n: int) -> None:
     for kw in KWS_TARGETS:
         wav_files = sorted((kws_root / kw).glob("*.wav")) if (kws_root / kw).exists() else []
         rng.shuffle(wav_files)
-        for w in wav_files[:n // len(KWS_TARGETS) + 2]:
+        for w in wav_files[:KWS_N // len(KWS_TARGETS) + 2]:
             items.append({
                 "id": f"kws_{kw}_{w.stem}",
                 "wav": str(w.relative_to(ROOT)),
@@ -194,7 +191,7 @@ def build_kws_bank(prog: ProgressLog, n: int) -> None:
     for kw in ["_background_noise_", "silence"]:
         wav_files = sorted((kws_root / kw).glob("*.wav")) if (kws_root / kw).exists() else []
         rng.shuffle(wav_files)
-        for w in wav_files[:n // 4]:
+        for w in wav_files[:KWS_N // 4]:
             items.append({
                 "id": f"kws_nt_{kw}_{w.stem}",
                 "wav": str(w.relative_to(ROOT)),
@@ -228,7 +225,7 @@ def build_kws_bank(prog: ProgressLog, n: int) -> None:
         log.info(f"[prereg] Frozen {len(probe_ids)} injection-probe IDs.")
 
     rng.shuffle(items)
-    for item in items[:n]:
+    for item in items[:KWS_N]:
         if item["id"] not in done_ids:
             jsonl_append(KWS_BANK, item)
             done_ids.add(item["id"])
@@ -237,136 +234,15 @@ def build_kws_bank(prog: ProgressLog, n: int) -> None:
     log.info(f"[done] KWS bank: {len(jsonl_ids(KWS_BANK))} items.")
 
 
-# ── Spoken SQuAD → sqa.jsonl ──────────────────────────────────────────────────
-def build_sqa_bank(prog: ProgressLog, n: int) -> None:
-    key = "sqa_bank"
-    if prog.done(key):
-        log.info("[skip] SQA bank already built.")
-        return
-
-    SQA_BANK = ROOT / "itembanks" / "sqa.jsonl"
-    done_ids = jsonl_ids(SQA_BANK)
-    
-    passage_dir = DATA / "speech_sqa_passages"
-    question_dir = DATA / "speech_sqa_questions"
-    passage_dir.mkdir(parents=True, exist_ok=True)
-    question_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        from datasets import load_dataset
-        import edge_tts
-        import asyncio
-        import soundfile as sf
-        import io
-    except ImportError as e:
-        log.warning(f"[SQA] Missing dependencies ({e}). Run: pip install datasets edge-tts soundfile. Skipping.")
-        return
-
-    log.info("[SQA] Loading AudioLLMs/spoken_squad_test...")
-    import datasets
-    
-    async def synthesize(text, out_path):
-        communicate = edge_tts.Communicate(text, "en-US-AriaNeural")
-        await communicate.save(str(out_path))
-
-    added = 0
-    try:
-        ds = load_dataset("AudioLLMs/spoken_squad_test", split="test", streaming=True)
-        ds = ds.cast_column("context", datasets.Audio(decode=False))
-        log.info(f"[SQA] Fetching first {n} items from streaming dataset...")
-        items = list(ds.take(n))
-    except Exception as e:
-        log.error(f"[SQA] Failed to load/stream dataset: {e}")
-        raise e
-
-    for idx in range(n):
-        uid = f"sqa_{idx}"
-        if uid in done_ids:
-            added += 1
-            continue
-            
-        try:
-            item = items[idx]
-        except IndexError as e:
-            log.error(f"[SQA] Index {idx} out of range in streamed items (total fetched: {len(items)}): {e}")
-            raise e
-            
-        passage_text = "" # Spoken SQuAD HF test split doesn't contain passage transcript text
-        question_text = item.get("instruction", "")
-        answer_text = item.get("answer", "")
-        audio_data = item.get("context", {}) or {}
-            
-        passage_wav = passage_dir / f"{uid}.wav"
-        question_wav = question_dir / f"{uid}.wav"
-        
-        # Save or synthesize passage audio
-        if not passage_wav.exists():
-            if "array" in audio_data and "sampling_rate" in audio_data:
-                sf.write(str(passage_wav), audio_data["array"], audio_data["sampling_rate"])
-            elif "bytes" in audio_data and audio_data["bytes"]:
-                with open(passage_wav, "wb") as f:
-                    f.write(audio_data["bytes"])
-            elif "path" in audio_data and audio_data["path"]:
-                import shutil
-                shutil.copy(audio_data["path"], passage_wav)
-            else:
-                # Synthesize passage since no audio is provided
-                try:
-                    asyncio.run(synthesize(passage_text, passage_wav))
-                except Exception as e:
-                    log.warning(f"[SQA] Failed to synthesize fallback passage for {uid}: {e}")
-                    continue
-                
-        # Synthesize question audio
-        if not question_wav.exists():
-            try:
-                asyncio.run(synthesize(question_text, question_wav))
-            except Exception as e:
-                log.warning(f"[SQA] Failed to synthesize question for {uid}: {e}")
-                continue
-
-        jsonl_append(SQA_BANK, {
-            "id": uid,
-            "wav": str(passage_wav.relative_to(ROOT)),
-            "question_wav": str(question_wav.relative_to(ROOT)),
-            "question": question_text,
-            "answer": answer_text,
-            "passage_text": passage_text,
-            "source": "spoken_squad",
-            "accent": "american_english",
-            "gender": "unknown",
-        })
-        done_ids.add(uid)
-        added += 1
-
-    prog.mark(key)
-    log.info(f"[done] SQA bank: {len(jsonl_ids(SQA_BANK))} items.")
-
-
 # ── main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 2 — Build foreground item banks")
-    ap.add_argument("--smoke-test", action="store_true",
-                    help="Build tiny banks (5 items each) for a quick smoke test.")
-    args = ap.parse_args()
-    n = SMOKE_N if args.smoke_test else -1  # -1 means use full defaults
-
-    asr_n = SMOKE_N if args.smoke_test else ASR_N
-    kws_n = SMOKE_N if args.smoke_test else KWS_N
-    sqa_n = SMOKE_N if args.smoke_test else ASR_N # SQA gets ~100 to match ASR
-
-    if args.smoke_test:
-        log.info("=== SMOKE TEST MODE ===")
+    ap.parse_args()
 
     prog = ProgressLog(PROGRESS)
-    # Reset smoke keys so full run can redo them properly
-    if args.smoke_test:
-        for k in ["asr_bank", "kws_bank", "sqa_bank"]:
-            prog._data.pop(k, None)
 
-    build_asr_bank(prog, asr_n)
-    build_kws_bank(prog, kws_n)
-    build_sqa_bank(prog, sqa_n)
+    build_asr_bank(prog)
+    build_kws_bank(prog)
 
     log.info("=== Stage 2 complete. ===")
 

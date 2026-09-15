@@ -9,7 +9,6 @@ Produces:
   prereg/prereg.json
 
 Usage:
-  python scripts/03_curate_battery.py --smoke-test   # 3 backgrounds only
   python scripts/03_curate_battery.py                # full run (resumable)
 """
 from __future__ import annotations
@@ -203,11 +202,10 @@ def _stationarity(x: np.ndarray) -> float:
 
 
 # ── curate battery ────────────────────────────────────────────────────────────
-def curate_battery(prog: ProgressLog, smoke: bool) -> None:
-    spec = BATTERY_SPEC[:3] if smoke else BATTERY_SPEC
+def curate_battery(prog: ProgressLog) -> None:
     records: list[dict] = []
 
-    for bg_id, glob_pattern, category in spec:
+    for bg_id, glob_pattern, category in BATTERY_SPEC:
         key = f"curate_{bg_id}"
         out = BG_DIR / f"{bg_id}.wav"
 
@@ -256,18 +254,18 @@ def curate_battery(prog: ProgressLog, smoke: bool) -> None:
     else:
         log.warning("[battery] No records collected — battery.parquet not written.")
 
-    freeze_prereg(smoke)
+    freeze_prereg()
 
 
 # ── pre-registration ──────────────────────────────────────────────────────────
-def freeze_prereg(smoke: bool) -> None:
+def freeze_prereg() -> None:
     if PREREG.exists():
         log.info("[prereg] Already frozen. Skipping (nothing changes after first model run).")
         return
     PREREG.parent.mkdir(parents=True, exist_ok=True)
     prereg = {
         "project": "AIP-Speech",
-        "battery_ids": [s[0] for s in (BATTERY_SPEC[:3] if smoke else BATTERY_SPEC)],
+        "battery_ids": [s[0] for s in BATTERY_SPEC],
         "snr_grid_db": SNR_GRID,
         "descriptor_definitions": {
             "speech_likeness":   "Fraction of 30ms frames above energy threshold (VAD proxy)",
@@ -288,7 +286,6 @@ def freeze_prereg(smoke: bool) -> None:
             "DRI":   "(max_g DWER_g - min_g DWER_g) / mean DWER",
             "RER":   "effect_with_instruction / effect_without",
         },
-        "smoke_mode": smoke,
     }
     PREREG.write_text(json.dumps(prereg, indent=2))
     log.info(f"[prereg] Frozen → {PREREG}")
@@ -297,14 +294,10 @@ def freeze_prereg(smoke: bool) -> None:
 # ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 3 — Curate battery, descriptors")
-    ap.add_argument("--smoke-test", action="store_true",
-                    help="Process only 3 backgrounds to verify the pipeline.")
-    args = ap.parse_args()
-    if args.smoke_test:
-        log.info("=== SMOKE TEST MODE ===")
+    ap.parse_args()
 
     prog = ProgressLog(PROGRESS)
-    curate_battery(prog, smoke=args.smoke_test)
+    curate_battery(prog)
     log.info("=== Stage 3 complete. ===")
 
 

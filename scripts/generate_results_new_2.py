@@ -6,7 +6,7 @@ Generates figures and tables for results_new/:
   - Computes a broad pool of acoustic descriptors for every background recording.
   - Computes Spearman correlations with task degradation (averaged over 10, 5, 0 dB SNR).
   - Selects the top 3 descriptors driven by data.
-  - Figure 1: 1x3 Grid of Regression lines (ASR, KWS, SQA using RAW degradation values).
+  - Figure 1: 1x3 Grid of Regression lines (ASR, KWS using RAW degradation values).
   - Figure 2: Spearman correlation heatmap (Descriptors x Tasks).
   - Figure 3: Per-background degradation ranking horizontal bar plot.
   - Saves full descriptor table & full correlation table to CSV for Appendix.
@@ -57,7 +57,6 @@ BG_CATEGORY_MAP = {
 TASK_COLORS = {
     'ASR': '#4C72B0',  # Blue
     'KWS': '#DD8452',  # Orange
-    'SQA': '#55A868'   # Green
 }
 
 def set_paper_style():
@@ -128,12 +127,10 @@ def load_task_degradations():
     print("Loading evaluation metrics averaged over 10, 5, 0 dB SNR...")
     asr = pd.read_csv(PLOTS_NEW_DIR / "asr_results.csv")
     kws = pd.read_csv(PLOTS_NEW_DIR / "kws_results.csv")
-    sqa = pd.read_csv(PLOTS_NEW_DIR / "sqa_results.csv")
 
     # Filter noisy conditions across 10, 5, 0 dB
     asr_noisy = asr[asr['condition'] == 'noisy']
     kws_noisy = kws[kws['condition'] == 'noisy']
-    sqa_noisy = sqa[sqa['condition'] == 'noisy']
 
     # Mean raw degradation per background:
     # ASR: dwer = noisy - clean (higher = worse)
@@ -142,10 +139,7 @@ def load_task_degradations():
     # KWS: dacc = noisy - clean -> degradation = -dacc = clean - noisy (higher = worse)
     kws_deg = -kws_noisy.groupby('bg_id')['dacc'].mean()
 
-    # SQA: df1 = noisy - clean -> degradation = -df1 = clean - noisy (higher = worse)
-    sqa_deg = -sqa_noisy.groupby('bg_id')['df1'].mean()
-
-    deg_df = pd.DataFrame({'ASR': asr_deg, 'KWS': kws_deg, 'SQA': sqa_deg})
+    deg_df = pd.DataFrame({'ASR': asr_deg, 'KWS': kws_deg})
     return deg_df
 
 
@@ -155,14 +149,12 @@ def compute_correlations(desc_df, deg_df):
     for col in desc_df.columns:
         r_asr, p_asr = stats.spearmanr(merged[col], merged['ASR'])
         r_kws, p_kws = stats.spearmanr(merged[col], merged['KWS'])
-        r_sqa, p_sqa = stats.spearmanr(merged[col], merged['SQA'])
-        mean_r = np.mean([r_asr, r_kws, r_sqa])
-        mean_abs_r = np.mean([abs(r_asr), abs(r_kws), abs(r_sqa)])
+        mean_r = np.mean([r_asr, r_kws])
+        mean_abs_r = np.mean([abs(r_asr), abs(r_kws)])
         corrs.append({
             'Descriptor': col,
             'ASR (r_s)': round(r_asr, 3), 'ASR (p)': round(p_asr, 3),
             'KWS (r_s)': round(r_kws, 3), 'KWS (p)': round(p_kws, 3),
-            'SQA (r_s)': round(r_sqa, 3), 'SQA (p)': round(p_sqa, 3),
             'Mean r_s': round(mean_r, 3),
             'Mean |r_s|': round(mean_abs_r, 3)
         })
@@ -195,50 +187,6 @@ def generate_figure1_scatter(merged, top_descriptors):
         
     plt.tight_layout()
     out = OUT_DIR / "fig1_descriptor_regressions.png"
-    plt.savefig(out, dpi=300)
-    plt.close()
-    print(f"Saved {out.name}")
-
-
-def generate_figure2_heatmap(corr_df):
-    print("Generating Figure 2: Spearman correlation heatmap across descriptors and tasks...")
-    heatmap_df = corr_df.set_index('Descriptor')[['ASR (r_s)', 'KWS (r_s)']].copy()
-    heatmap_df.columns = ['ASR', 'KWS']
-    
-    plt.figure(figsize=(10, 8.5))
-    ax = sns.heatmap(
-        heatmap_df,
-        annot=True,
-        fmt=".3f",
-        annot_kws={"size": 15},
-        cmap="vlag",
-        center=0,
-        cbar_kws={'label': 'Spearman Correlation'},
-        linewidths=1.2,
-        linecolor='white',
-        square=True
-    )
-    
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelsize=15)
-    cbar.set_label('Spearman Correlation', fontsize=17, labelpad=12)
-
-    # Bold the best (highest absolute correlation) descriptor in each column
-    max_row_per_col = heatmap_df.abs().idxmax()
-    for r_idx, row_name in enumerate(heatmap_df.index):
-        for c_idx, col_name in enumerate(heatmap_df.columns):
-            if row_name == max_row_per_col[col_name]:
-                text_obj = ax.texts[r_idx * len(heatmap_df.columns) + c_idx]
-                text_obj.set_weight('bold')
-                text_obj.set_fontsize(17)
-                
-    plt.title("Spearman Correlation between Acoustic Descriptors\nand Task Degradations", pad=20, fontsize=19, fontweight='bold')
-    plt.ylabel("Acoustic Descriptor", labelpad=12, fontsize=17, fontweight='bold')
-    plt.xlabel("Evaluation Task", labelpad=12, fontsize=17, fontweight='bold')
-    ax.tick_params(axis='x', labelsize=16, labelrotation=0)
-    ax.tick_params(axis='y', labelsize=15, labelrotation=0)
-    plt.tight_layout()
-    out = OUT_DIR / "fig2_spearman_correlation_heatmap.png"
     plt.savefig(out, dpi=300)
     plt.close()
     print(f"Saved {out.name}")
@@ -632,7 +580,6 @@ def main():
     
     # 4. Generate Figures
     generate_figure1_scatter(merged, top_3)
-    generate_figure2_heatmap(corr_df)
     generate_figure2_heatmap_horizontal(corr_df)
     generate_figure3_ranking(deg_df)
     generate_accent_degradation_plot()
