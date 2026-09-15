@@ -1,0 +1,97 @@
+# ── Data (source corpora, raw downloads) ──────────────────────────────────────
+data/
+!data/.gitkeep
+
+# ── Models / HF cache ─────────────────────────────────────────────────────────
+models/
+.cache/
+huggingface/
+transformers_cache/
+
+# ── Inference outputs ─────────────────────────────────────────────────────────
+inference/
+!inference/.gitkeep
+inference_backup/
+inference_1/
+inference backup/
+inference_run.log
+
+# ── Results / figures ─────────────────────────────────────────────────────────
+results/
+!results/.gitkeep
+
+# ── Checks (mix_diagnostics, inspection wavs) ─────────────────────────────────
+checks/
+!checks/.gitkeep
+
+# ── Descriptors (generated parquet) ───────────────────────────────────────────
+descriptors/
+
+# ── Item banks & manifests (generated) ────────────────────────────────────────
+itembanks/
+!itembanks/.gitkeep
+manifests/
+!manifests/.gitkeep
+
+# ── Scratch space ─────────────────────────────────────────────────────────────
+scratch/
+test_*.py
+Kimi-Audio/
+*src.txt
+results_1st_run/
+scripts/*_airport*.py
+
+# ── Pre-registration (KEEP — frozen after Day 2) ──────────────────────────────
+prereg/*
+!prereg/prereg.json
+# prereg/prereg.json  → tracked intentionally
+
+# ── Python artefacts ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Scratch & Temporary Files ──────────────────────────────────────────────────
+temp_*.jsonl
+*_check.jsonl
+*_fresh.jsonl
+*_full.jsonl
+full_sqa.jsonl
+live_*.jsonl
+qwen*.jsonl
+timestamp_output.txt
+check_vol.py
+check_modal_timestamp*.py
+fix.py
+
+# ── Local Inference Sync & Backup Folders ────────────────────────────────────
+inference_sync_*/
+inference_backup_*/
+kws_closed_run/
+results_backup_*/
+result_new_*/
+results_new_*/
+results_old/
+
+# ── Editor / OS ───────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+requirements.txt
+
