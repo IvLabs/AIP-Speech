@@ -95,3 +95,7 @@ results_old/
 *~
 requirements.txt
 
+# ── Local progress docs (not for camera-ready repo) ───────────────────────────
+CLAUDE.md
+results.md
+camera-ready.md
