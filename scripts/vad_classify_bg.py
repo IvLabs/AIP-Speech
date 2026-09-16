@@ -121,7 +121,7 @@ def _silero_vote(wav_path: Path, model, get_speech_timestamps,
         total = len(tensor)
         speech = sum(s["end"] - s["start"] for s in timestamps)
         sf = float(speech / total) if total > 0 else 0.0
-        vote ="speech_like" if sf > 0.0 else "non_speech"
+        vote = "speech_like" if sf > 0.0 else "non_speech"
         return vote, round(sf, 4)
     except Exception as e:
         log.warning(f"  [Silero error] {wav_path.name}: {e}")

@@ -334,7 +334,7 @@ def figa5_architecture_view() -> None:
     ax.set_ylabel("Mean ΔWER (all noisy conditions)")
     ax.set_title("Fig A5 — Architecture View: ΔWER vs Coupling Tier")
     ax.set_xticklabels(models, rotation=25, ha="right", fontsize=8)
-    handles =[mpatches.Patch(color=PALETTE[i], label=t)
+    handles = [mpatches.Patch(color=PALETTE[i], label=t)
                for i, t in enumerate(["end-to-end", "LoRA adapter", "USM + LLM"])]
     ax.legend(handles=handles, fontsize=8)
     out = FIG_DIR / "figa5_architecture_view.pdf"

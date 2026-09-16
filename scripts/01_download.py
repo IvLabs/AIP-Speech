@@ -198,7 +198,7 @@ def download_speech_commands(prog: ProgressLog) -> None:
         log.info("[skip] Speech Commands v2 already done.")
         return
     dest_dir = DATA / "speech_kws"
-    url ="https://storage.googleapis.com/download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
+    url = "https://storage.googleapis.com/download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
     archive = dest_dir / "speech_commands_v2.tar.gz"
     download(url, archive, "Speech Commands v2")
     extract_tar(archive, dest_dir)

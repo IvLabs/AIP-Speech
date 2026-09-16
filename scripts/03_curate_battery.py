@@ -152,7 +152,7 @@ def _mod_energy(x: np.ndarray, f_lo: float, f_hi: float) -> float:
     """Modulation energy of the temporal envelope in [f_lo, f_hi] Hz."""
     from scipy.signal import butter, sosfilt, hilbert
     env = np.abs(hilbert(x))
-    sos =butter(4, [f_lo, f_hi], btype="bandpass", fs=SR, output="sos")
+    sos = butter(4, [f_lo, f_hi], btype="bandpass", fs=SR, output="sos")
     filtered = sosfilt(sos, env)
     total = float(np.mean(env**2)) + 1e-9
     return float(np.mean(filtered**2) / total)

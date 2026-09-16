@@ -119,7 +119,7 @@ def check_bg_presence(prog: ProgressLog) -> None:
     for clip in clips:
         x = load_audio(clip)
         # proxy for audibility: fraction of 30 ms frames above an RMS floor
-        frames =[x[i:i+480] for i in range(0, len(x)-480, 480)]
+        frames = [x[i:i+480] for i in range(0, len(x)-480, 480)]
         rms = [float(np.sqrt(np.mean(f**2))) for f in frames]
         presence_score = float(np.mean(np.array(rms) > 1e-4))
         csv_append(BG_PRESENCE, {

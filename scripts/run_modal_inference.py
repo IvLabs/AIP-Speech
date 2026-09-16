@@ -87,7 +87,7 @@ app = modal.App("aip-speech-inference")
 # model weights, so a rerun doesn't re-download them
 cache_volume = modal.Volume.from_name("aip-models-cache", create_if_missing=True)
 # inference output, pulled down to the local machine as the run progresses
-inference_volume =modal.Volume.from_name("aip-inference-out", create_if_missing=True)
+inference_volume = modal.Volume.from_name("aip-inference-out", create_if_missing=True)
 
 hf_secret = modal.Secret.from_dict({"HF_TOKEN": os.environ["HF_TOKEN"]}) if os.environ.get("HF_TOKEN") else None
 secrets = [hf_secret] if hf_secret else []
@@ -141,7 +141,7 @@ def main(model: str = "all", task: str = "all"):
 
     timestamp = int(time.time())
     # per-run folder, so a sync never overwrites another model's local data
-    sync_dir =f"inference_sync_{model}_{timestamp}"
+    sync_dir = f"inference_sync_{model}_{timestamp}"
     print(f"Starting Modal run on L4 GPU. model={model}, task={task}")
     print(f"Local sync directory for this run: {sync_dir}/")
     

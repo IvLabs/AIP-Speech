@@ -55,7 +55,7 @@ def build_asr_bank(prog: ProgressLog) -> None:
     items: list[dict] = []
 
     # gender comes from SPEAKERS.TXT, not the transcript files
-    speakers_file =DATA / "speech_asr" / "LibriSpeech" / "SPEAKERS.TXT"
+    speakers_file = DATA / "speech_asr" / "LibriSpeech" / "SPEAKERS.TXT"
     speaker_gender = {}
     if speakers_file.exists():
         with open(speakers_file) as f:
@@ -212,7 +212,7 @@ def build_kws_bank(prog: ProgressLog) -> None:
             })
 
     # frozen once, so TIR is always scored against the same probes
-    prereg_probe =ROOT / "prereg" / "injection_probe_ids.json"
+    prereg_probe = ROOT / "prereg" / "injection_probe_ids.json"
     prereg_probe.parent.mkdir(parents=True, exist_ok=True)
     if not prereg_probe.exists():
         prereg_probe.write_text(json.dumps(probe_ids, indent=2))
