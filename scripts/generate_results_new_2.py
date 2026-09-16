@@ -6,9 +6,12 @@ Generates figures and tables for results_new/:
   - Computes a broad pool of acoustic descriptors for every background recording.
   - Computes Spearman correlations with task degradation (averaged over 10, 5, 0 dB SNR).
   - Selects the top 3 descriptors driven by data.
-  - Figure 1: 1x3 Grid of Regression lines (ASR, KWS using RAW degradation values).
-  - Figure 2: Spearman correlation heatmap (Descriptors x Tasks).
-  - Figure 3: Per-background degradation ranking horizontal bar plot.
+  - fig1: regression lines for the top 3 descriptors (ASR + KWS, raw degradation).
+  - fig2: Spearman correlation heatmap (tasks x descriptors).
+  - fig3: per-background degradation ranking.
+  - fig4: ΔWER across accent subgroups.
+  - fig5: prompt-steering Residual Effect Ratio per model.
+  - fig6: WER and KWS accuracy across SNRs, side by side.
   - Saves full descriptor table & full correlation table to CSV for Appendix.
 """
 
@@ -53,8 +56,8 @@ BG_CATEGORY_MAP = {
 }
 
 TASK_COLORS = {
-    'ASR': '#4C72B0',  # Blue
-    'KWS': '#DD8452',  # Orange
+    'ASR': '#4C72B0',
+    'KWS': '#DD8452',
 }
 
 def set_paper_style():
@@ -112,7 +115,6 @@ def extract_acoustic_descriptors():
         
     df_desc = pd.DataFrame(records).set_index('bg_id')
     
-    # Load Silero VAD voiced fraction
     vad_csv = ROOT / "descriptors" / "vad_bg_labels.csv"
     if vad_csv.exists():
         vad_df = pd.read_csv(vad_csv).set_index('bg_id')
@@ -126,15 +128,12 @@ def load_task_degradations():
     asr = pd.read_csv(PLOTS_NEW_DIR / "asr_results.csv")
     kws = pd.read_csv(PLOTS_NEW_DIR / "kws_results.csv")
 
-    # Filter noisy conditions across 10, 5, 0 dB
     asr_noisy = asr[asr['condition'] == 'noisy']
     kws_noisy = kws[kws['condition'] == 'noisy']
 
-    # Mean raw degradation per background:
-    # ASR: dwer = noisy - clean (higher = worse)
     asr_deg = asr_noisy.groupby('bg_id')['dwer'].mean()
 
-    # KWS: dacc = noisy - clean -> degradation = -dacc = clean - noisy (higher = worse)
+    # flip dacc so that, as with ΔWER, a larger number means more damage
     kws_deg = -kws_noisy.groupby('bg_id')['dacc'].mean()
 
     deg_df = pd.DataFrame({'ASR': asr_deg, 'KWS': kws_deg})
@@ -345,7 +344,7 @@ def generate_prompt_rer_plot():
     records = []
     
     for m in models:
-        # 1. ASR RER
+        # ASR
         try:
             with open(ROOT / "results" / m / "asr.jsonl", encoding='utf-8') as f:
                 base_data = [json.loads(line) for line in f]
@@ -371,7 +370,7 @@ def generate_prompt_rer_plot():
         except Exception as e:
             print(f"Error computing ASR RER for {m}: {e}")
             
-        # 2. KWS RER
+        # KWS
         try:
             with open(ROOT / "results" / m / "kws.jsonl", encoding='utf-8') as f:
                 base_data = [json.loads(line) for line in f]
@@ -430,7 +429,6 @@ def generate_prompt_rer_plot():
     ax.tick_params(axis='y', labelsize=16)
     plt.legend(loc='upper right', fontsize=15, title_fontsize=16, frameon=True, framealpha=0.95)
     
-    # Annotate bars with values
     for p in ax.patches:
         height = p.get_height()
         if not np.isnan(height) and height > 0:
@@ -490,7 +488,6 @@ def generate_snr_performance_side_by_side_plot():
         'qwen2_audio_7b': 'v'
     }
     
-    # 1. Left Subplot: ASR (WER vs SNR)
     ax1 = axes[0]
     for model in MODELS:
         m_df = asr_grp[asr_grp['model'] == model].copy()
@@ -517,12 +514,11 @@ def generate_snr_performance_side_by_side_plot():
     ax1.legend(title="Model", loc='upper left', fontsize=14, title_fontsize=15, frameon=True, framealpha=0.95)
     ax1.grid(True, linestyle='--', alpha=0.5)
 
-    # 2. Right Subplot: KWS (Accuracy vs SNR)
     ax2 = axes[1]
     if not kws_grp.empty:
         for model in MODELS:
             if model == 'qwen2_audio_7b':
-                continue  # Exclude Qwen2-Audio 7B from KWS plot
+                continue
             m_df = kws_grp[kws_grp['model'] == model].copy()
             if m_df.empty: continue
             m_df['snr_pos'] = m_df['snr_db'].map(lambda x: snr_order.index(x) if x in snr_order else -1)
@@ -556,27 +552,22 @@ def generate_snr_performance_side_by_side_plot():
 
 def main():
     set_paper_style()
-    
-    # 1. Extract acoustic descriptor pool
+
     desc_df = extract_acoustic_descriptors()
     desc_csv = OUT_DIR / "appendix_acoustic_descriptors_table.csv"
     desc_df.to_csv(desc_csv)
     print(f"Saved complete descriptor table: {desc_csv}")
     
-    # 2. Load task degradations
     deg_df = load_task_degradations()
-    
-    # 3. Compute correlations
     merged, corr_df = compute_correlations(desc_df, deg_df)
     corr_csv = OUT_DIR / "appendix_correlation_matrix_table.csv"
     corr_df.to_csv(corr_csv, index=False)
     print(f"Saved complete correlation table: {corr_csv}")
     
-    # Select top 3 descriptors by mean |r_s|
+    # corr_df is already sorted by mean |r_s|
     top_3 = corr_df.head(3)['Descriptor'].tolist()
     print(f"\nTop 3 data-driven descriptors selected: {top_3}")
-    
-    # 4. Generate Figures
+
     generate_figure1_scatter(merged, top_3)
     generate_figure2_heatmap_horizontal(corr_df)
     generate_figure3_ranking(deg_df)

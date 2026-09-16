@@ -10,7 +10,6 @@ All deltas are strictly calculated as:
   Delta = Noisy - Clean
   - dwer = wer_noisy - wer_clean (positive indicates error increase)
   - dacc = acc_noisy - acc_clean (negative indicates accuracy drop)
-  - df1  = f1_noisy - f1_clean   (negative indicates F1 score drop)
 """
 
 import json
@@ -25,7 +24,6 @@ OLD_PLOTS_DIR = RESULTS_DIR / "plots"
 NEW_PLOTS_DIR = RESULTS_DIR / "plots_new"
 NEW_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── AACL / EMNLP Publication Style ──────────────────────────────────────────
 def set_paper_style():
     plt.rcParams.update({
         'font.size': 13,
@@ -125,7 +123,6 @@ def load_kws_data():
         clean = df[df["condition"] == "clean"][["model", "speech_id", "correct"]].rename(columns={"correct": "acc_clean"})
         df = df.merge(clean, on=["model", "speech_id"], how="left")
 
-    # Delta = Noisy - Clean
     if "acc_clean" in df.columns and "correct" in df.columns:
         df["dacc"] = df["correct"] - df["acc_clean"]
 
@@ -311,7 +308,7 @@ def plot_bar_silero_vad_speech_vs_nonspeech(asr_df):
 
 
 def plot_holistic_and_task_degradations(asr_df, kws_df):
-    # Prepare ASR (dwer = noisy - clean; higher positive dwer = worse performance)
+    # for ASR a bigger dwer is already worse
     df_asr = asr_df[asr_df['snr_db'] == 0].copy()
     if df_asr.empty: return
     if 'bg_id' not in df_asr.columns and 'background_id' in df_asr.columns:
@@ -321,7 +318,7 @@ def plot_holistic_and_task_degradations(asr_df, kws_df):
     df_asr['task'] = 'ASR'
     df_asr['dataset'] = 'ASR_Dataset'
 
-    # Prepare KWS (dacc = noisy - clean; -dacc = clean - noisy, higher positive = worse performance)
+    # KWS accuracy drops when it degrades, so flip the sign to match ASR
     df_kws = kws_df[(kws_df['condition'] == 'noisy') & (kws_df['snr_db'] == 0)].copy()
     if 'bg_id' not in df_kws.columns and 'background_id' in df_kws.columns:
         df_kws['bg_id'] = df_kws['background_id']
@@ -393,7 +390,6 @@ def main():
 
     print(f"ASR records: {len(asr_df)}, KWS records: {len(kws_df)}")
 
-    # Save CSV files with delta = noisy - clean in plots_new
     asr_df.to_csv(NEW_PLOTS_DIR / "asr_results.csv", index=False)
     kws_df.to_csv(NEW_PLOTS_DIR / "kws_results.csv", index=False)
 

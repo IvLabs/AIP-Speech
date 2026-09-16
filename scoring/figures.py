@@ -38,7 +38,6 @@ log = get_logger("figures")
 RESULTS  = ROOT / "results"
 FIG_DIR  = RESULTS / "figures"
 
-# ── style ─────────────────────────────────────────────────────────────────────
 plt.rcParams.update({
     "font.family": "sans-serif",
     "font.size": 10,
@@ -60,13 +59,9 @@ def _load_battery() -> pd.DataFrame:
     p = ROOT / "descriptors" / "battery.parquet"
     if not p.exists():
         return pd.DataFrame()
-    df = pd.read_parquet(p)
-    if "category" in df.columns:
-        pass
-    return df
+    return pd.read_parquet(p)
 
 
-# ── Fig 1: Partial-dependence (descriptor law) ────────────────────────────────
 def fig1_descriptor_law() -> None:
     asr = _load("e1_asr.csv")
     battery = _load_battery()
@@ -90,7 +85,7 @@ def fig1_descriptor_law() -> None:
             continue
         xs = df[desc].dropna()
         ys = df.loc[xs.index, "dwer"]
-        # Partial-dependence proxy: bin and plot mean ± SE
+        # partial-dependence proxy: decile bins, mean ± SE
         bins = np.percentile(xs, np.linspace(0, 100, 11))
         bin_idx = np.digitize(xs, bins)
         means, ses, centers = [], [], []
@@ -118,7 +113,6 @@ def fig1_descriptor_law() -> None:
     log.info(f"[Fig1] → {out}")
 
 
-# ── Fig 2: Semantic gap ───────────────────────────────────────────────────────
 def fig2_semantic_gap() -> None:
     e2 = _load("e2_asr.csv")
     if e2.empty:
@@ -145,7 +139,6 @@ def fig2_semantic_gap() -> None:
     log.info(f"[Fig2] → {out}")
 
 
-# ── Fig 3: Disparate robustness ───────────────────────────────────────────────
 def fig3_disparate_robustness() -> None:
     e3 = _load("e3_fairness.csv")
     asr = _load("e1_asr.csv")
@@ -153,7 +146,6 @@ def fig3_disparate_robustness() -> None:
         log.warning("[Fig3] e3_fairness.csv not found.")
         return
 
-    # Accent subgroup
     sub_accent = e3[e3["subgroup_type"] == "accent"].copy()
     if sub_accent.empty:
         log.warning("[Fig3] No accent subgroup data.")
@@ -171,7 +163,7 @@ def fig3_disparate_robustness() -> None:
         ax.bar(x + w, sub_accent["dwer_non_speech"].fillna(0), w,
                label="Non-speech bg", color=PALETTE[3])
 
-    # Clean gap (baseline WER difference across accents — overlaid as scatter)
+    # overlay clean WER, so a gap that predates the noise is visible
     if not asr.empty and "accent" in asr.columns and "wer" in asr.columns:
         clean_wer = (asr[asr["condition"] == "clean"]
                      .groupby("accent")["wer"].mean().reset_index()
@@ -194,7 +186,6 @@ def fig3_disparate_robustness() -> None:
     log.info(f"[Fig3] → {out}")
 
 
-# ── Fig A1: SNR dose-response ─────────────────────────────────────────────────
 def figa1_snr_dose_response() -> None:
     asr = _load("e1_asr.csv")
     battery = _load_battery()
@@ -224,7 +215,6 @@ def figa1_snr_dose_response() -> None:
     log.info(f"[FigA1] → {out}")
 
 
-# ── Fig A2: Error/injection taxonomy ─────────────────────────────────────────
 def figa2_error_taxonomy() -> None:
     asr = _load("e1_asr.csv")
     if asr.empty or "substitutions" not in asr.columns:
@@ -252,7 +242,6 @@ def figa2_error_taxonomy() -> None:
     log.info(f"[FigA2] → {out}")
 
 
-# ── Fig A3: Steerability RER ─────────────────────────────────────────────────
 def figa3_steerability() -> None:
     e4 = _load("e4_steerability.csv")
     if e4.empty:
@@ -280,7 +269,6 @@ def figa3_steerability() -> None:
     log.info(f"[FigA3] → {out}")
 
 
-# ── Fig A4: Battery descriptor-space map ─────────────────────────────────────
 def figa4_battery_map() -> None:
     battery = _load_battery()
     if battery.empty:
@@ -322,7 +310,6 @@ def figa4_battery_map() -> None:
     log.info(f"[FigA4] → {out}")
 
 
-# ── Fig A5: Architecture view ─────────────────────────────────────────────────
 COUPLING_TIER = {
     "qwen25_omni_3b":  "end-to-end",
     "qwen2_audio_7b":  "end-to-end",
@@ -347,8 +334,7 @@ def figa5_architecture_view() -> None:
     ax.set_ylabel("Mean ΔWER (all noisy conditions)")
     ax.set_title("Fig A5 — Architecture View: ΔWER vs Coupling Tier")
     ax.set_xticklabels(models, rotation=25, ha="right", fontsize=8)
-    # Add tier legend
-    handles = [mpatches.Patch(color=PALETTE[i], label=t)
+    handles =[mpatches.Patch(color=PALETTE[i], label=t)
                for i, t in enumerate(["end-to-end", "LoRA adapter", "USM + LLM"])]
     ax.legend(handles=handles, fontsize=8)
     out = FIG_DIR / "figa5_architecture_view.pdf"
@@ -358,10 +344,9 @@ def figa5_architecture_view() -> None:
     log.info(f"[FigA5] → {out}")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
-    # Try importing sklearn for A4; it's optional
+    # sklearn is only needed for the PCA map, so don't hard-require it
     try:
         import sklearn  # noqa: F401
         _has_sklearn = True

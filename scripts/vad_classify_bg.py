@@ -3,8 +3,7 @@
 vad_classify_bg.py — Multi-VAD ensemble classification of background audio files.
 
 Uses an ensemble of two independent VAD systems with their published default
-settings. Final label is determined by majority vote — no continuous threshold
-to tune, making the classification fully defensible in a research paper.
+settings, so there is no continuous threshold tuned on our own data.
 
 VAD ensemble:
     1. Silero VAD   — neural VAD (Silerospeech/silero-vad, PyTorch Hub)
@@ -12,10 +11,10 @@ VAD ensemble:
     2. webrtcvad    — Google's WebRTC signal-processing VAD
                       Aggressiveness level: 2 (moderate, published default)
 
-Voting:
-    speech_like  — both VADs agree it contains speech
-    non_speech   — both VADs agree it does not contain speech
-    uncertain    — VADs disagree (printed as a warning; falls back to Silero)
+Voting is OR, deliberately conservative about calling something non-speech:
+    speech_like  — either VAD detects speech
+    non_speech   — neither VAD detects speech
+    unknown      — both VADs failed or were unavailable
 
 Outputs:
     descriptors/vad_bg_labels.csv   — per-file VAD scores, individual votes,
@@ -48,13 +47,12 @@ BG_DIR        = DATA / "bg"
 OUT_CSV       = ROOT / "descriptors" / "vad_bg_labels.csv"
 SILERO_CACHE  = ROOT / "models" / "cache" / "silero_vad"
 
-# ── Published defaults (no project-specific tuning) ───────────────────────────
+# published defaults, not tuned on this project's data
 SILERO_SENSITIVITY   = 0.50   # Silero's recommended default for speech detection
 WEBRTC_AGGRESSIVENESS = 2     # webrtcvad: 0 (gentle) → 3 (aggressive); 2 is moderate
 
-# ── Hand-coded ground-truth from 03_curate_battery.py ────────────────────────
-# Used only for the accuracy comparison at the end. These are the pre-registered
-# gold labels — NOT used to tune any VAD parameter.
+# pre-registered hand labels from 03_curate_battery.py, used only for the
+# agreement check at the end — never to tune a VAD parameter
 KNOWN_LABELS: dict[str, str] = {
     "esc_rain":            "non_speech",
     "esc_seawave":         "non_speech",
@@ -80,7 +78,6 @@ KNOWN_LABELS: dict[str, str] = {
 }
 
 
-# ── VAD 1: Silero VAD (neural, PyTorch Hub) ───────────────────────────────────
 def _load_silero():
     """Load Silero VAD from torch.hub (cached locally after first download)."""
     import torch
@@ -124,15 +121,13 @@ def _silero_vote(wav_path: Path, model, get_speech_timestamps,
         total = len(tensor)
         speech = sum(s["end"] - s["start"] for s in timestamps)
         sf = float(speech / total) if total > 0 else 0.0
-        # Vote: any detected speech → speech_like
-        vote = "speech_like" if sf > 0.0 else "non_speech"
+        vote ="speech_like" if sf > 0.0 else "non_speech"
         return vote, round(sf, 4)
     except Exception as e:
         log.warning(f"  [Silero error] {wav_path.name}: {e}")
         return "error", float("nan")
 
 
-# ── VAD 2: webrtcvad (Google WebRTC, signal-processing) ──────────────────────
 def _webrtc_available() -> bool:
     try:
         import webrtcvad  # noqa: F401
@@ -155,7 +150,7 @@ def _webrtc_vote(wav_path: Path, aggressiveness: int) -> tuple[str, float]:
         FRAME_RATE = 16_000
         FRAME_LEN  = int(FRAME_RATE * FRAME_MS / 1000)   # 480 samples
 
-        # Load audio as 16-bit PCM bytes
+        # webrtcvad only accepts raw 16-bit PCM
         audio_f32 = load_audio(wav_path, sr=FRAME_RATE)
         audio_i16 = (audio_f32 * 32767).clip(-32768, 32767).astype(np.int16)
         pcm_bytes  = audio_i16.tobytes()
@@ -163,7 +158,6 @@ def _webrtc_vote(wav_path: Path, aggressiveness: int) -> tuple[str, float]:
         vad = webrtcvad.Vad(aggressiveness)
         frame_size_bytes = FRAME_LEN * 2  # 2 bytes per int16 sample
 
-        # Process each frame
         n_total  = 0
         n_voiced = 0
         for start in range(0, len(pcm_bytes) - frame_size_bytes, frame_size_bytes):
@@ -188,15 +182,12 @@ def _webrtc_vote(wav_path: Path, aggressiveness: int) -> tuple[str, float]:
         return "error", float("nan")
 
 
-# ── Ensemble voting ───────────────────────────────────────────────────────────
 def _ensemble_vote(silero_vote: str, webrtc_vote: str) -> str:
     """
-    Combine two VAD votes into a final ensemble label.
-
-    Strategy (OR logic):
+    Combine two VAD votes into a final ensemble label (OR logic):
         Either VAD says speech_like → speech_like
-        Both say non_speech        → non_speech
-        Any error / unavailable    → fall back to the other model
+        Both say non_speech         → non_speech
+        Any error / unavailable     → fall back to the other model
     """
     if silero_vote in ("error", "unavailable") and webrtc_vote in ("error", "unavailable"):
         return "unknown"
@@ -204,13 +195,11 @@ def _ensemble_vote(silero_vote: str, webrtc_vote: str) -> str:
         return webrtc_vote
     if webrtc_vote in ("error", "unavailable"):
         return silero_vote
-    # OR logic: if EITHER says speech_like, it is speech_like
     if silero_vote == "speech_like" or webrtc_vote == "speech_like":
         return "speech_like"
     return "non_speech"
 
 
-# ── Main classification loop ──────────────────────────────────────────────────
 def classify_bg_folder(bg_dir: Path,
                        silero_sensitivity: float,
                        webrtc_aggressiveness: int) -> list[dict]:
@@ -222,7 +211,7 @@ def classify_bg_folder(bg_dir: Path,
     log.info(f"[VAD] {len(wav_files)} WAV files in {bg_dir}")
     log.info(f"[VAD] Silero sensitivity (default=0.5)   : {silero_sensitivity}")
     log.info(f"[VAD] webrtcvad aggressiveness (0-3)     : {webrtc_aggressiveness}")
-    log.info("[VAD] Ensemble strategy                  : majority vote (both must agree)")
+    log.info("[VAD] Ensemble strategy                  : OR (either VAD detecting speech wins)")
 
     has_webrtc = _webrtc_available()
     if not has_webrtc:
@@ -236,7 +225,6 @@ def classify_bg_folder(bg_dir: Path,
         bg_id = wav_path.stem
         log.info(f"[{i}/{len(wav_files)}] {bg_id}")
 
-        # Run both VADs
         sv, sf = _silero_vote(wav_path, silero_model, get_speech_timestamps,
                               silero_sensitivity)
         wv, wf = _webrtc_vote(wav_path, webrtc_aggressiveness) \
@@ -244,7 +232,6 @@ def classify_bg_folder(bg_dir: Path,
 
         final = _ensemble_vote(sv, wv)
 
-        # Compare with pre-registered hand-coded label
         known = KNOWN_LABELS.get(bg_id, "unknown")
         match = (final == known) if known != "unknown" and final not in ("uncertain", "unknown") \
                 else None
@@ -274,7 +261,6 @@ def classify_bg_folder(bg_dir: Path,
     return records
 
 
-# ── Save CSV ──────────────────────────────────────────────────────────────────
 def _save_csv(records: list[dict], out_path: Path) -> None:
     if not records:
         log.warning("[save] No records to save.")
@@ -287,7 +273,6 @@ def _save_csv(records: list[dict], out_path: Path) -> None:
     log.info(f"[save] {len(records)} rows → {out_path}")
 
 
-# ── Summary report ────────────────────────────────────────────────────────────
 def _print_summary(records: list[dict]) -> None:
     if not records:
         return
@@ -313,7 +298,7 @@ def _print_summary(records: list[dict]) -> None:
         log.info(f"  Agreement w/ hand labels: {len(correct)}/{len(evaluated)} ({acc:.1f}%)")
     log.info("")
 
-    # Detailed table sorted by silero speech fraction
+    # sorted by silero speech fraction, loudest speech first
     log.info(f"  {'bg_id':<25} {'Silero':>8} {'webrtc':>8} {'ensemble':<14} {'known':<14} match")
     log.info("  " + "-" * 85)
     for r in sorted(records, key=lambda x: -(x["silero_speech_frac"]
@@ -324,7 +309,6 @@ def _print_summary(records: list[dict]) -> None:
         log.info(f"  {r['bg_id']:<25} {sf:>8} {wf:>8} {r['ensemble_label']:<14} {r['known_label']:<14} {mt}")
     log.info("=" * 65)
 
-    # Mismatches
     mismatches = [r for r in evaluated if not r["label_match"]]
     if mismatches:
         log.info("")
@@ -341,13 +325,12 @@ def _print_summary(records: list[dict]) -> None:
         log.info("  ✓ All ensemble labels agree with pre-registered categories.")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=(
             "Multi-VAD ensemble classification of background audio files.\n"
-            "Uses Silero VAD (neural) + webrtcvad (signal-processing) with\n"
-            "majority voting. No continuous threshold to tune."
+            "Uses Silero VAD (neural) + webrtcvad (signal-processing); a file\n"
+            "counts as speech-like if either detects speech."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

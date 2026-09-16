@@ -38,8 +38,7 @@ def ensure_venv() -> Path:
 def main() -> None:
     print("=== AIP-Speech environment setup ===")
 
-    # If already running inside some venv, install into that one directly.
-    # Otherwise, create/reuse ./.venv and install into it.
+    # install into the active venv if there is one, else into ./.venv
     already_in_venv = sys.prefix != sys.base_prefix or os.environ.get("VIRTUAL_ENV")
     python_exe = sys.executable if already_in_venv else str(ensure_venv())
 
@@ -60,7 +59,6 @@ def main() -> None:
         print(f"[ERROR] Failed to install dependencies: {e}")
         sys.exit(1)
 
-    # Create necessary folders
     print("\n--- Creating Directories ---")
     dirs_to_create = [
         "data/bg", "data/bg_raw",

@@ -8,7 +8,7 @@ Runs scorers for every experiment:
   E3: per-subgroup ΔWER, Robustness Gap, DRI
   E4: RER (if steer outputs exist)
 
-All results → results/ as CSVs + updates results.md.
+All results → results/ as CSVs.
 
 Usage:
   python scoring/score_all.py
@@ -34,7 +34,6 @@ MANIFESTS = ROOT / "manifests"
 BATTERY_F = ROOT / "descriptors" / "battery.parquet"
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
 def _load_battery_df() -> pd.DataFrame:
     if BATTERY_F.exists():
         return pd.read_parquet(BATTERY_F)
@@ -85,7 +84,6 @@ def _error_counts(ref: str, hyp: str) -> dict:
         return {"substitutions": 0, "deletions": 0, "insertions": 0}
 
 
-# ── E1 ASR scoring ─────────────────────────────────────────────────────────────
 def score_e1_asr() -> pd.DataFrame:
     log.info("[E1-ASR] Scoring...")
     records = []
@@ -129,7 +127,6 @@ def score_e1_asr() -> pd.DataFrame:
     return df_all
 
 
-# ── E1 KWS scoring ─────────────────────────────────────────────────────────────
 def score_e1_kws() -> pd.DataFrame:
     log.info("[E1-KWS] Scoring...")
     records = []
@@ -142,10 +139,9 @@ def score_e1_kws() -> pd.DataFrame:
             hyp_raw  = str(row.get("raw", "")).lower().strip()
             is_target = bool(row.get("is_target", False))
             hyp_kw   = hyp_raw.split()[0] if hyp_raw else "silence"
-            # Closed-set: target needs exact match; non-target is correct
-            # only if no target keyword was predicted.
+            # closed set: a target must match exactly, a non-target is correct
+            # only if no target keyword came back
             correct  = (hyp_kw == ref_kw) if is_target else (hyp_kw not in _kws_targets())
-            # For FAR: non-target clip predicted as a target keyword
             false_alarm = (not is_target) and (hyp_kw in [kw.lower() for kw in _kws_targets()])
             records.append({
                 "model":         model_id,
@@ -173,7 +169,6 @@ def _kws_targets() -> list[str]:
     return ["yes","no","up","down","left","right","on","off","stop","go"]
 
 
-# ── E2 scoring: TIR ───────────────────────────────────────────────────────────
 def score_e2() -> None:
     log.info("[E2] Scoring real + injection rates...")
     battery_df = _load_battery_df()
@@ -211,8 +206,6 @@ def score_e2() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(records_asr).to_csv(out, index=False)
     log.info(f"[E2-ASR] → {out}")
-
-    # TIR: FAR on injection probes vs generic noise
     _score_tir()
 
 
@@ -248,7 +241,6 @@ def _score_tir() -> None:
     log.info(f"[E2-TIR] → {out}")
 
 
-# ── E3 scoring: disparate robustness ─────────────────────────────────────────
 def score_e3() -> None:
     log.info("[E3] Disparate robustness scoring...")
     asr_df = pd.read_csv(RESULTS / "e1_asr.csv") if (RESULTS / "e1_asr.csv").exists() else pd.DataFrame()
@@ -262,7 +254,6 @@ def score_e3() -> None:
     non_speech_bgs  = battery_df[battery_df["category"] == "non_speech"]["bg_id"].tolist() \
         if not battery_df.empty else []
 
-    # Per-subgroup ΔWER
     subgroups = ["accent", "gender"]
     records = []
     for sg in subgroups:
@@ -271,7 +262,6 @@ def score_e3() -> None:
         for group_val, group_df in asr_df.groupby(sg):
             noisy = group_df[group_df["condition"] == "noisy"]
             mean_dwer = float(noisy["dwer"].mean()) if "dwer" in noisy.columns else float("nan")
-            # Speech-like vs non-speech breakdown
             dwer_sl = float(noisy[noisy["background_id"].isin(speech_like_bgs)]["dwer"].mean()) \
                 if speech_like_bgs else float("nan")
             dwer_ns = float(noisy[noisy["background_id"].isin(non_speech_bgs)]["dwer"].mean()) \
@@ -287,7 +277,7 @@ def score_e3() -> None:
 
     df_e3 = pd.DataFrame(records)
     if not df_e3.empty:
-        # Robustness Gap and DRI per subgroup type
+        # gap and DRI per subgroup type
         for sg in df_e3["subgroup_type"].unique():
             sub = df_e3[df_e3["subgroup_type"] == sg]["mean_dwer"].dropna()
             if len(sub) >= 2:
@@ -300,7 +290,6 @@ def score_e3() -> None:
     log.info(f"[E3] → {out}")
 
 
-# ── E4 scoring: steerability ──────────────────────────────────────────────────
 def score_e4() -> None:
     """RER = effect_with_instruction / effect_without."""
     log.info("[E4] Steerability scoring...")
@@ -311,7 +300,6 @@ def score_e4() -> None:
         if df_base.empty or df_steer.empty:
             continue
 
-        # Compute effect for each condition
         for df, label in [(df_base, "base"), (df_steer, "steer")]:
             noisy = df[df["condition"] == "noisy"]
             clean = df[df["condition"] == "clean"][["speech_id", "raw"]].rename(
@@ -342,7 +330,6 @@ def score_e4() -> None:
     log.info(f"[E4] → {out}")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 6 — Score all experiments")
     ap.parse_args()

@@ -2,10 +2,10 @@
 """
 04_manipulation_checks.py — Stage 4: manipulation checks before inference.
 
-Checks (from §Stage 4 of implementation plan):
+Checks:
   1. Background presence   → checks/bg_presence.csv
   2. WER constancy         → checks/wer_constancy.csv
-  4. Determinism floor     → checks/determinism.json
+  3. Determinism floor     → checks/determinism.json
 
 Also materialises the fixed ~60-clip inspection sample → checks/inspection/
 
@@ -39,10 +39,9 @@ WER_CONST   = ROOT / "checks" / "wer_constancy.csv"
 DETERMINISM = ROOT / "checks" / "determinism.json"
 
 RANDOM_SEED    = 42
-INSPECT_N      = 60   # full inspection sample size
+INSPECT_N      = 60
 
 
-# ── build inspection sample ───────────────────────────────────────────────────
 def _load_battery() -> list[dict]:
     """Return battery as list of dicts."""
     bat_file = ROOT / "descriptors" / "battery.parquet"
@@ -102,7 +101,6 @@ def materialise_inspection(prog: ProgressLog) -> None:
     prog.mark(key)
 
 
-# ── check 1: background presence ─────────────────────────────────────────────
 def check_bg_presence(prog: ProgressLog) -> None:
     """
     Confirm background is audible in each inspection clip using a simple
@@ -120,8 +118,8 @@ def check_bg_presence(prog: ProgressLog) -> None:
 
     for clip in clips:
         x = load_audio(clip)
-        # Proxy: fraction of energy in non-silent frames
-        frames = [x[i:i+480] for i in range(0, len(x)-480, 480)]
+        # proxy for audibility: fraction of 30 ms frames above an RMS floor
+        frames =[x[i:i+480] for i in range(0, len(x)-480, 480)]
         rms = [float(np.sqrt(np.mean(f**2))) for f in frames]
         presence_score = float(np.mean(np.array(rms) > 1e-4))
         csv_append(BG_PRESENCE, {
@@ -134,7 +132,6 @@ def check_bg_presence(prog: ProgressLog) -> None:
     log.info(f"[done] bg_presence → {BG_PRESENCE}")
 
 
-# ── check 2: WER constancy ────────────────────────────────────────────────────
 def check_wer_constancy(prog: ProgressLog) -> None:
     """
     Whisper WER on the inspection clips should not vary wildly across backgrounds
@@ -186,7 +183,6 @@ def check_wer_constancy(prog: ProgressLog) -> None:
     log.info(f"[done] wer_constancy → {WER_CONST}")
 
 
-# ── check 3: determinism floor ────────────────────────────────────────────────
 def check_determinism(prog: ProgressLog) -> None:
     """
     Evaluate transcribe determinism by running Whisper twice on same WAVs.
@@ -204,7 +200,7 @@ def check_determinism(prog: ProgressLog) -> None:
 
     df = pd.read_csv(asr_f)
     noisy = df[df["condition"] == "noisy"]
-    # Sample 10 items for speed but sufficient coverage
+    # 10 items is enough to catch nondeterminism without a long Whisper run
     noisy = noisy.sample(n=min(len(noisy), 10), random_state=RANDOM_SEED)
 
     try:
@@ -227,7 +223,6 @@ def check_determinism(prog: ProgressLog) -> None:
         bg = load_audio(ROOT / str(bg_wav)) if bg_wav else None
         wav = mix(sp, bg, float(row["snr_db"]), int(row["seed"]))
 
-        # save temporarily
         wav_path = ROOT / "checks" / "temp_det.wav"
         sf.write(str(wav_path), wav, SR)
 
@@ -248,7 +243,6 @@ def check_determinism(prog: ProgressLog) -> None:
     log.info(f"[done] determinism: {result}")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 4 — Manipulation checks")
     ap.parse_args()

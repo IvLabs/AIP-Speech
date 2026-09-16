@@ -36,7 +36,6 @@ KWS_TARGETS = ["yes", "no", "up", "down", "left", "right",
                "on", "off", "stop", "go"]
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
 def _all_models() -> list[str]:
     if not INFER.exists():
         return []
@@ -49,9 +48,8 @@ def _clean_hyp(hyp: str) -> str:
     hyp = str(hyp).strip()
     if hyp == "__ERROR__":
         return hyp
-    # Strip common Qwen2-Audio preambles
+    # Qwen2-Audio wraps its answer in a preamble; strip it before scoring
     hyp = re.sub(r"^(The transcription of the speech is|The speech transcribed from the audio is|The keyword is|The word is)[^:]*:\s*['\"]?", "", hyp, flags=re.IGNORECASE)
-    # Also remove trailing quotes if we removed a leading quote
     if hyp.endswith("'") or hyp.endswith('"'):
         hyp = hyp[:-1]
     return hyp.strip()
@@ -77,9 +75,7 @@ def _load_battery() -> pd.DataFrame:
 def _normalize_asr_text(s: str) -> str:
     import re, string
     s = str(s).lower()
-    # Replace punctuation with spaces
     s = re.sub(rf"[{re.escape(string.punctuation)}]", " ", s)
-    # Normalize whitespaces
     s = " ".join(s.split())
     return s
 
@@ -142,7 +138,6 @@ def _save(df: pd.DataFrame, name: str) -> Path:
     return out
 
 
-# ── E1-ASR: WER, CER, ΔWER ───────────────────────────────────────────────────
 def score_e1_asr() -> pd.DataFrame:
     log.info("[E1-ASR] Scoring WER / CER / ΔWER ...")
     records = []
@@ -184,7 +179,6 @@ def score_e1_asr() -> pd.DataFrame:
     return out
 
 
-# ── E1-KWS: Accuracy, FAR, Miss ──────────────────────────────────────────────
 def score_e1_kws() -> pd.DataFrame:
     log.info("[E1-KWS] Scoring Accuracy / FAR / Miss ...")
     records = []
@@ -234,8 +228,7 @@ def _score_e1_profile() -> None:
     merged = df_asr.merge(bat, left_on="background_id", right_on="bg_id", how="inner")
     if not merged.empty:
         _save(merged, "e1_profile.csv")
-        
-        # Calculate speech_like vs non-speech dwer comparison
+
         if "category" in merged.columns:
             comp = merged[merged["category"].isin(["speech_like", "non_speech"])]
             if not comp.empty:
@@ -245,8 +238,6 @@ def _score_e1_profile() -> None:
                 for _, row in summary.iterrows():
                     log.info(f"  {row['model']} / {row['category']}: Mean ΔWER = {row['dwer']:.4f}")
 
-
-# ── E2-ASR ───────────────────────────────────────────────────────────────────
 
 def score_e2() -> None:
     log.info("[E2] Scoring real + TIR ...")
@@ -284,8 +275,6 @@ def score_e2() -> None:
                 })
 
     _save(pd.DataFrame(records), "e2_semantic.csv")
-
-    # TIR
     _score_tir()
 
 
@@ -319,7 +308,6 @@ def _score_tir() -> None:
     _save(pd.DataFrame(records), "e2_tir.csv")
 
 
-# ── E3: Disparate Robustness ─────────────────────────────────────────────────
 def score_e3() -> None:
     log.info("[E3] Disparate-robustness scoring ...")
     asr_path = RESULTS / "e1_asr.csv"
@@ -328,12 +316,10 @@ def score_e3() -> None:
         return
     asr = pd.read_csv(asr_path)
 
-    # Bring in source from itembank
     asr_items = {r["id"]: r.get("source", "") for r in jsonl_read(ROOT / "itembanks" / "asr.jsonl")}
     asr["source"] = asr["speech_id"].map(asr_items)
-    
-    # We no longer filter only for Common Voice, so LibriSpeech is included in gender/accent analysis!
-    # asr = asr[asr["source"] == "common_voice_17"]
+
+    # accent/gender are analysed over LibriSpeech too, not just Common Voice
 
     bat = _load_battery()
     sl_ids = (bat[bat["category"] == "speech_like"]["bg_id"].tolist()
@@ -365,7 +351,7 @@ def score_e3() -> None:
                 })
 
     df_e3 = pd.DataFrame(records)
-    # Robustness Gap + DRI per (model, subgroup_type)
+    # gap and DRI are computed per (model, subgroup_type)
     if not df_e3.empty:
         gaps = []
         for (mid, sg), sub in df_e3.groupby(["model", "subgroup_type"]):
@@ -383,7 +369,6 @@ def score_e3() -> None:
     _save(df_e3, "e3_fairness.csv")
 
 
-# ── E4: Steerability (RER) ───────────────────────────────────────────────────
 def score_e4() -> None:
     log.info("[E4] Steerability / RER scoring ...")
     records = []
@@ -444,7 +429,6 @@ def score_e4() -> None:
     _save(df_e4, "e4_steer.csv")
 
 
-# ── E4-KWS: Steerability for keyword spotting ─────────────────────────────────
 def score_e4_kws() -> None:
     log.info("[E4-KWS] Steerability / KWS prompt engineering scoring ...")
     records = []
@@ -499,7 +483,6 @@ def score_e4_kws() -> None:
     _save(df_e4k, "e4_kws_steer.csv")
 
 
-# ── Plots (Visualizations) ───────────────────────────────────────────────────
 def plot_all_results() -> None:
     log.info("[Plots] Generating result visualizations ...")
     try:
@@ -514,13 +497,12 @@ def plot_all_results() -> None:
     PLOT_DIR.mkdir(parents=True, exist_ok=True)
     bat = _load_battery()
     
-    # ── E1 General Robustness (Box, Violin, Line Graphs) ──
+    # E1: general robustness
     asr_f = RESULTS / "e1_asr.csv"
     if asr_f.exists() and asr_f.stat().st_size > 10:
         df_asr = pd.read_csv(asr_f)
         noisy = df_asr[df_asr["condition"] == "noisy"]
         if "dwer" in df_asr.columns and not noisy.empty:
-            # Box plot
             plt.figure(figsize=(10, 6))
             sns.boxplot(data=noisy, x="model", y="dwer")
             plt.title("E1 ASR: ΔWER Box Plot across Models")
@@ -528,8 +510,7 @@ def plot_all_results() -> None:
             plt.tight_layout()
             plt.savefig(PLOT_DIR / "e1_asr_dwer_box.png")
             plt.close()
-            
-            # Violin plot
+
             plt.figure(figsize=(10, 6))
             sns.violinplot(data=noisy, x="model", y="dwer", inner="quartile")
             plt.title("E1 ASR: ΔWER Violin Plot across Models")
@@ -538,7 +519,6 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e1_asr_dwer_violin.png")
             plt.close()
 
-            # Point plot (Line graph) over SNR
             if "snr_db" in df_asr.columns:
                 plt.figure(figsize=(10, 6))
                 sns.pointplot(data=noisy, x="snr_db", y="wer", hue="model", markers="o")
@@ -547,20 +527,18 @@ def plot_all_results() -> None:
                 plt.savefig(PLOT_DIR / "e1_asr_wer_by_snr_line.png")
                 plt.close()
 
-    # ── Fig 1: E1 Profile Law ──
+    # profile law: degradation vs descriptor
     prof_f = RESULTS / "e1_profile.csv"
     if prof_f.exists() and prof_f.stat().st_size > 10:
         df_prof = pd.read_csv(prof_f)
         noisy = df_prof[df_prof["condition"] == "noisy"]
         if "speech_likeness" in noisy.columns:
-            # Regression plot
             g = sns.lmplot(data=noisy, x="speech_likeness", y="dwer", hue="model", scatter_kws={'alpha':0.3})
             g.fig.suptitle("Fig 1a: E1 Profile Law (ΔWER vs Speech-Likeness) - Reg")
             g.fig.tight_layout()
             g.savefig(PLOT_DIR / "fig1a_profile_speech_likeness.png")
             plt.close(g.fig)
-            
-            # Line plot
+
             plt.figure(figsize=(10, 6))
             sns.lineplot(data=noisy, x="speech_likeness", y="dwer", hue="model", marker="o")
             plt.title("Fig 1a: E1 Profile Law (ΔWER vs Speech-Likeness) - Line")
@@ -569,14 +547,12 @@ def plot_all_results() -> None:
             plt.close()
             
         if "mod_2to8Hz" in noisy.columns:
-            # Regression plot
             g = sns.lmplot(data=noisy, x="mod_2to8Hz", y="dwer", hue="model", scatter_kws={'alpha':0.3})
             g.fig.suptitle("Fig 1b: E1 Profile Law (ΔWER vs Syllabic Modulation 2-8Hz) - Reg")
             g.fig.tight_layout()
             g.savefig(PLOT_DIR / "fig1b_profile_modulation.png")
             plt.close(g.fig)
-            
-            # Line plot
+
             plt.figure(figsize=(10, 6))
             sns.lineplot(data=noisy, x="mod_2to8Hz", y="dwer", hue="model", marker="o")
             plt.title("Fig 1b: E1 Profile Law (ΔWER vs Syllabic Modulation 2-8Hz) - Line")
@@ -584,14 +560,12 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "fig1b_profile_modulation_line.png")
             plt.close()
 
-        # Speech-like vs Non-speech category comparison plots (ASR, KWS)
         comp_asr = pd.DataFrame()
         comp_kws = pd.DataFrame()
 
         if "category" in noisy.columns:
             comp_asr = noisy[noisy["category"].isin(["speech_like", "non_speech"])].copy()
 
-        # Load and process KWS
         kws_f = RESULTS / "e1_kws.csv"
         if kws_f.exists() and kws_f.stat().st_size > 10:
             try:
@@ -600,18 +574,15 @@ def plot_all_results() -> None:
                     clean_kws = df_kws[df_kws["condition"] == "clean"][["model", "speech_id", "correct"]].rename(columns={"correct": "correct_clean"})
                     df_kws = df_kws.merge(clean_kws, on=["model", "speech_id"], how="left")
                     df_kws["dacc"] = df_kws["correct"] - df_kws["correct_clean"]
-                    # Merge with battery
                     df_kws = df_kws.merge(bat, left_on="background_id", right_on="bg_id", how="inner")
                     if "category" in df_kws.columns:
                         comp_kws = df_kws[(df_kws["condition"] == "noisy") & (df_kws["category"].isin(["speech_like", "non_speech"]))].copy()
             except Exception as e:
                 log.warning(f"[Plots] Could not process KWS category comparison: {e}")
 
-        # Generate the multi-column Bar plot
         fig, axes = plt.subplots(1, 2, figsize=(12, 6))
         has_bar_data = False
 
-        # ASR Subplot
         if not comp_asr.empty:
             sns.barplot(data=comp_asr, x="model", y="dwer", hue="category", ax=axes[0])
             axes[0].set_title("ASR Task: Mean ΔWER\n(Lower/Near 0 is Better)")
@@ -621,7 +592,6 @@ def plot_all_results() -> None:
         else:
             axes[0].text(0.5, 0.5, "No ASR Data", ha="center", va="center")
 
-        # KWS Subplot
         if not comp_kws.empty:
             sns.barplot(data=comp_kws, x="model", y="dacc", hue="category", ax=axes[1])
             axes[1].set_title("KWS Task: Mean ΔAccuracy\n(Higher/Near 0 is Better)")
@@ -637,11 +607,9 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e1_speech_vs_non_speech_bar.png")
             plt.close()
 
-        # Generate the multi-column Box plot
         fig, axes = plt.subplots(1, 2, figsize=(12, 6))
         has_box_data = False
 
-        # ASR Subplot
         if not comp_asr.empty:
             sns.boxplot(data=comp_asr, x="model", y="dwer", hue="category", ax=axes[0])
             axes[0].set_title("ASR Task: ΔWER Distribution")
@@ -651,7 +619,6 @@ def plot_all_results() -> None:
         else:
             axes[0].text(0.5, 0.5, "No ASR Data", ha="center", va="center")
 
-        # KWS Subplot
         if not comp_kws.empty:
             sns.boxplot(data=comp_kws, x="model", y="dacc", hue="category", ax=axes[1])
             axes[1].set_title("KWS Task: ΔAccuracy Distribution")
@@ -667,7 +634,7 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e1_speech_vs_non_speech_box.png")
             plt.close()
 
-    # ── Task Generalisation (ASR vs KWS) ──
+    # does a background that hurts ASR also hurt KWS?
     kws_f = RESULTS / "e1_kws.csv"
     if asr_f.exists() and kws_f.exists() and asr_f.stat().st_size > 10 and kws_f.stat().st_size > 10:
         df_asr = pd.read_csv(asr_f)
@@ -683,12 +650,11 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e2_task_generalisation_scatter.png")
             plt.close()
 
-    # ── Fig 2: E2 Semantic Bias & Injection ──
+    # E2: semantic bias and injection
     e2_f = RESULTS / "e2_semantic.csv"
     if e2_f.exists() and e2_f.stat().st_size > 10:
         df_e2 = pd.read_csv(e2_f)
         if "dwer_real" in df_e2.columns:
-            # Bar plot
             plt.figure(figsize=(10, 6))
             sns.barplot(data=df_e2, x="model", y="dwer_real")
             plt.title("Fig 2a: E2 ASR ΔWER under Speech-like Noise at 0 dB")
@@ -708,7 +674,7 @@ def plot_all_results() -> None:
         plt.savefig(PLOT_DIR / "fig2c_tir.png")
         plt.close()
 
-    # ── Fig 3: E3 Disparate Robustness (Ecological) ──
+    # E3: disparate robustness
     e3_f = RESULTS / "e3_gaps.csv"
     if e3_f.exists() and e3_f.stat().st_size > 10:
         df_e3 = pd.read_csv(e3_f)
@@ -724,10 +690,8 @@ def plot_all_results() -> None:
     if e3_f_fair.exists() and e3_f_fair.stat().st_size > 10:
         df_fair = pd.read_csv(e3_f_fair)
         if "dwer_speech_like" in df_fair.columns and "dwer_non_speech" in df_fair.columns:
-            # Melt for speech_like vs non-speech comparison
             df_fair_melt = df_fair.melt(id_vars=["model", "subgroup_type", "subgroup_value"], value_vars=["dwer_speech_like", "dwer_non_speech"], var_name="BgType", value_name="ΔWER")
             
-            # 1. Accent-only plots
             df_acc = df_fair_melt[df_fair_melt["subgroup_type"] == "accent"]
             if not df_acc.empty:
                 plt.figure(figsize=(12, 6))
@@ -746,7 +710,6 @@ def plot_all_results() -> None:
                 plt.savefig(PLOT_DIR / "fig3b_ecological_accent_box.png")
                 plt.close()
 
-            # 2. Gender-only plots
             df_gen = df_fair_melt[df_fair_melt["subgroup_type"] == "gender"]
             if not df_gen.empty:
                 plt.figure(figsize=(10, 6))
@@ -757,12 +720,11 @@ def plot_all_results() -> None:
                 plt.savefig(PLOT_DIR / "fig3c_ecological_gender_bar.png")
                 plt.close()
 
-    # ── E4 ASR Steerability ──
+    # E4: steerability, ASR
     e4_f = RESULTS / "e4_steer.csv"
     if e4_f.exists() and e4_f.stat().st_size > 10:
         df_e4 = pd.read_csv(e4_f)
 
-        # Bar plot: mean ΔWER per prompt per model
         plt.figure(figsize=(12, 6))
         sns.barplot(data=df_e4, x="model", y="dwer", hue="prompt")
         plt.title("E4 ASR: Instruction Steerability (ΔWER by Prompt) - Bar")
@@ -771,7 +733,6 @@ def plot_all_results() -> None:
         plt.savefig(PLOT_DIR / "e4_asr_steerability_bar.png")
         plt.close()
 
-        # Line plot: mean ΔWER per prompt per model
         plt.figure(figsize=(12, 6))
         sns.pointplot(data=df_e4, x="model", y="dwer", hue="prompt", markers="o", linestyles="-")
         plt.title("E4 ASR: Instruction Steerability (ΔWER by Prompt) - Line")
@@ -780,7 +741,6 @@ def plot_all_results() -> None:
         plt.savefig(PLOT_DIR / "e4_asr_steerability_line.png")
         plt.close()
 
-        # Box plot: ΔWER distribution per prompt
         plt.figure(figsize=(14, 6))
         sns.boxplot(data=df_e4, x="prompt", y="dwer", hue="model")
         plt.title("E4 ASR: ΔWER Distribution per Steering Prompt - Box")
@@ -789,12 +749,11 @@ def plot_all_results() -> None:
         plt.savefig(PLOT_DIR / "e4_asr_steerability_box.png")
         plt.close()
 
-    # ── E4 KWS Steerability ──
+    # E4: steerability, KWS
     e4_kws_f = RESULTS / "e4_kws_steer.csv"
     if e4_kws_f.exists() and e4_kws_f.stat().st_size > 10:
         df_e4k = pd.read_csv(e4_kws_f)
 
-        # 1. Bar: mean accuracy per prompt per model
         if "correct" in df_e4k.columns:
             acc_grp = df_e4k.groupby(["model", "prompt"])["correct"].mean().reset_index()
             acc_grp.rename(columns={"correct": "accuracy"}, inplace=True)
@@ -806,7 +765,6 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e4_kws_steerability_acc_bar.png")
             plt.close()
 
-            # 2. Line: accuracy per prompt per model
             plt.figure(figsize=(12, 6))
             sns.pointplot(data=acc_grp, x="model", y="accuracy", hue="prompt", markers="o", linestyles="-")
             plt.title("E4 KWS: Keyword Accuracy by Steering Prompt - Line")
@@ -815,7 +773,6 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e4_kws_steerability_acc_line.png")
             plt.close()
 
-        # 3. Bar: false alarm rate per prompt per model
         if "false_alarm" in df_e4k.columns:
             far_grp = df_e4k.groupby(["model", "prompt"])["false_alarm"].mean().reset_index()
             far_grp.rename(columns={"false_alarm": "FAR"}, inplace=True)
@@ -827,7 +784,6 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e4_kws_steerability_far_bar.png")
             plt.close()
 
-        # 4. Box: per-utterance accuracy distribution per prompt
         if "correct" in df_e4k.columns:
             plt.figure(figsize=(14, 6))
             sns.boxplot(data=df_e4k, x="prompt", y="correct", hue="model")
@@ -837,7 +793,6 @@ def plot_all_results() -> None:
             plt.savefig(PLOT_DIR / "e4_kws_steerability_box.png")
             plt.close()
 
-        # 5. Side-by-side comparison: noisy-only accuracy per prompt
         if "condition" in df_e4k.columns and "correct" in df_e4k.columns:
             noisy_k = df_e4k[df_e4k["condition"] == "noisy"]
             plt.figure(figsize=(12, 6))
@@ -851,7 +806,6 @@ def plot_all_results() -> None:
     log.info(f"  → Plots saved to {PLOT_DIR}")
 
 
-# ── Summary Table (proposal Table 1) ─────────────────────────────────────────
 def build_summary() -> None:
     log.info("[Summary] Building headline table ...")
     rows = []
@@ -861,7 +815,6 @@ def build_summary() -> None:
     for mid in _all_models():
         entry = {"model": mid}
 
-        # ASR headline
         if asr_f.exists():
             asr = pd.read_csv(asr_f)
             asr = asr[asr["model"] == mid]
@@ -874,7 +827,6 @@ def build_summary() -> None:
                 entry["asr_dwer_worst_bg"] = round(float(
                     noisy.groupby("background_id")["dwer"].mean().max()), 4)
 
-        # KWS headline
         if kws_f.exists():
             kws = pd.read_csv(kws_f)
             kws = kws[kws["model"] == mid]
@@ -889,7 +841,6 @@ def build_summary() -> None:
     _save(pd.DataFrame(rows), "summary_table.csv")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 6 — Score all metrics")
     ap.parse_args()

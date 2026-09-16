@@ -14,7 +14,6 @@ def main():
         print(f"Error: {inference_1_dir} does not exist.")
         return
 
-    # 1. Load ASR bank and build gender mapping
     speech_gender_map = {}
     with open(asr_bank, "r", encoding="utf-8") as f:
         for line in f:
@@ -24,7 +23,7 @@ def main():
             speech_id = item.get("id")
             gender = item.get("gender")
             if speech_id and gender and gender != "unknown":
-                # Map to female_feminine or male_masculine
+                # match the Common Voice vocabulary already used in the rows
                 if gender.lower() == "female":
                     mapped_gender = "female_feminine"
                 else:
@@ -33,7 +32,6 @@ def main():
 
     print(f"Loaded {len(speech_gender_map)} gender mappings from {asr_bank.name}")
 
-    # 2. Iterate through all .jsonl files in inference_1 and update
     for model_dir in inference_1_dir.iterdir():
         if not model_dir.is_dir():
             continue
@@ -52,7 +50,7 @@ def main():
                     speech_id = row.get("speech_id")
                     current_gender = row.get("gender")
                     
-                    # If it's a LibriSpeech item (unknown gender initially) and we have a mapping for it
+                    # LibriSpeech rows went out with gender unknown; backfill them
                     if speech_id in speech_gender_map and current_gender == "unknown":
                         row["gender"] = speech_gender_map[speech_id]
                         updates_count += 1
@@ -60,7 +58,6 @@ def main():
                     updated_rows.append(row)
             
             if updates_count > 0:
-                # Rewrite the file with updated rows
                 with open(jsonl_file, "w", encoding="utf-8") as f:
                     for row in updated_rows:
                         f.write(json.dumps(row) + "\n")

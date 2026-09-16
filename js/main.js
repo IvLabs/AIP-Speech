@@ -185,19 +185,24 @@
   function renderPipeline() {
     var host = document.getElementById("pipeline-diagram");
     if (!host) return;
-    var W = 1060, H = 352;
+
+    var W = 1060, H = 348;
     var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "xMinYMin meet" });
+
+    // Measured metrics of the 10.5px mono label face: every gap below is derived
+    // from these, so rows can never overlap and content always centres cleanly.
+    var T_ASC = 10.45, T_DESC = 3.15, T_H = T_ASC + T_DESC, PAD = 10;
 
     function box(x, y, w, h) {
       svg.appendChild(svgEl("rect", { x: x, y: y, width: w, height: h, rx: 3, fill: "var(--paper)", stroke: "var(--rule-strong)", "stroke-width": 1 }));
     }
-    function title(x, y, w, text) {
-      var t = svgEl("text", { x: x + w / 2, y: y, "text-anchor": "middle", class: "bar-label", style: "font-weight:600; font-size:10.5px; letter-spacing:0.03em; text-transform:uppercase; fill: var(--ink)" });
+    function titleAt(cx, baseline, text) {
+      var t = svgEl("text", { x: cx, y: baseline, "text-anchor": "middle", class: "bar-label", style: "font-weight:600; font-size:10.5px; letter-spacing:0.03em; text-transform:uppercase; fill: var(--ink)" });
       t.textContent = text;
       svg.appendChild(t);
     }
-    function line(x, y, text, opts) {
-      var t = svgEl("text", Object.assign({ x: x, y: y, class: "axis-label", style: "font-size:10.5px; fill: var(--ink-soft)" }, opts || {}));
+    function lineAt(cx, baseline, text, opts) {
+      var t = svgEl("text", Object.assign({ x: cx, y: baseline, "text-anchor": "middle", class: "axis-label", style: "font-size:10.5px; fill: var(--ink-soft)" }, opts || {}));
       t.textContent = text;
       svg.appendChild(t);
     }
@@ -210,75 +215,153 @@
       svg.appendChild(svgEl("path", { d: "M " + (x - 3.5) + " " + (y2 - 9) + " L " + x + " " + y2 + " L " + (x + 3.5) + " " + (y2 - 9), fill: "none", stroke: "var(--ink-soft)", "stroke-width": 1.2 }));
     }
 
-    var rowTopY = 20, rowH1 = 200, gap = 16;
+    /* -- row primitives: each knows its own height and the gap that follows -- */
+    function rTitle(cx, text, gap) {
+      return { h: T_H, gap: gap == null ? 9 : gap, stretch: true, draw: function (top) { titleAt(cx, top + T_ASC, text); } };
+    }
+    function rText(cx, text, opts, gap, stretch) {
+      return { h: T_H, gap: gap == null ? 3 : gap, stretch: !!stretch, draw: function (top) { lineAt(cx, top + T_ASC, text, opts); } };
+    }
+    function rIcon(h, make, gap) {
+      return { h: h, gap: gap == null ? 9 : gap, stretch: true, draw: function (top) { svg.appendChild(make(top + h / 2)); } };
+    }
+    function rRule(x1, x2, gap) {
+      return { h: 1, gap: gap == null ? 9 : gap, stretch: true, draw: function (top) { svg.appendChild(svgEl("line", { x1: x1, y1: top + 0.5, x2: x2, y2: top + 0.5, class: "grid-line" })); } };
+    }
+    function rBand(h, gap, stretch, draw) { return { h: h, gap: gap, stretch: stretch, draw: draw }; }
 
-    // column 1: two stacked source boxes — icon gets its own row, never sharing the title's line
-    var c1x = 16, c1w = 168, subH = (rowH1 - gap) / 2;
-    box(c1x, rowTopY, c1w, subH);
-    title(c1x, rowTopY + 16, c1w, "Clean Speech");
-    svg.appendChild(icoWaveform(c1x + c1w / 2 - 13, rowTopY + 32, 26, 0.9, "var(--ink-soft)"));
-    ["LibriSpeech", "Common Voice", "Speech Cmds v2"].forEach(function (t, i) { line(c1x + c1w / 2, rowTopY + 56 + i * 15, t, { "text-anchor": "middle" }); });
+    // Vertically centre a stack of rows in a box; slack is absorbed by the
+    // stretchable gaps (capped) so tall boxes breathe without drifting apart.
+    function layout(rows, boxY, boxH, maxExtra) {
+      var content = 0, baseGaps = 0, nStretch = 0, i;
+      for (i = 0; i < rows.length; i++) {
+        content += rows[i].h;
+        if (i < rows.length - 1) { baseGaps += rows[i].gap; if (rows[i].stretch) nStretch++; }
+      }
+      var avail = boxH - 2 * PAD - content - baseGaps;
+      var extra = (nStretch > 0 && avail > 0) ? Math.min(maxExtra || 0, avail / nStretch) : 0;
+      var total = content + baseGaps + extra * nStretch;
+      var y = boxY + (boxH - total) / 2;
+      var placed = [];
+      for (i = 0; i < rows.length; i++) {
+        rows[i].draw(y);
+        placed.push({ top: y, h: rows[i].h });
+        y += rows[i].h + (i < rows.length - 1 ? rows[i].gap + (rows[i].stretch ? extra : 0) : 0);
+      }
+      return placed;
+    }
 
-    var c1by = rowTopY + subH + gap;
-    box(c1x, c1by, c1w, subH);
-    title(c1x, c1by + 16, c1w, "Background Audio");
-    svg.appendChild(icoWaveform(c1x + c1w / 2 - 13, c1by + 32, 26, 2.1, "var(--accent)"));
-    ["ESC-50 · MS-SNSD", "NOISEX-92 · MUSAN"].forEach(function (t, i) { line(c1x + c1w / 2, c1by + 56 + i * 15, t, { "text-anchor": "middle" }); });
+    var rowTopY = 20, rowH1 = 200, stackGap = 16, subH = (rowH1 - stackGap) / 2;
 
-    // column 2: controlled mixture (spans both rows, fed from both source boxes)
-    var c2x = c1x + c1w + 46, c2w = 158;
+    /* -- column 1: two stacked source boxes.
+          Text sits centred in the left field; the waveform sits in its own
+          right-hand field, so the two can never touch. -- */
+    var c1x = 16, c1w = 168;
+    var srcTextCx = c1x + 66, srcIconCx = c1x + 147;
+
+    function sourceBox(y, titleText, items, seed, color) {
+      box(c1x, y, c1w, subH);
+      var rows = [rTitle(srcTextCx, titleText)];
+      items.forEach(function (t) { rows.push(rText(srcTextCx, t)); });
+      var placed = layout(rows, y, subH, 0);
+      var first = placed[1], last = placed[placed.length - 1];
+      var iconCy = (first.top + last.top + last.h) / 2;
+      svg.appendChild(icoWaveform(srcIconCx - 13, iconCy, 26, seed, color));
+    }
+
+    sourceBox(rowTopY, "Clean Speech", ["LibriSpeech", "Common Voice", "Speech Cmds v2"], 0.9, "var(--ink-soft)");
+    var c1by = rowTopY + subH + stackGap;
+    sourceBox(c1by, "Background Audio", ["ESC-50 · MS-SNSD", "NOISEX-92 · MUSAN"], 2.1, "var(--accent)");
+
+    /* -- column 2: controlled mixture -- */
+    var c2x = c1x + c1w + 46, c2w = 158, c2cx = c2x + c2w / 2;
     box(c2x, rowTopY, c2w, rowH1);
-    title(c2x, rowTopY + 16, c2w, "Controlled Mixture");
-    svg.appendChild(icoWaveform(c2x + 18, rowTopY + 58, 20, 0.9, "var(--ink-soft)"));
-    line(c2x + 50, rowTopY + 62, "+", { "text-anchor": "middle", "font-weight": "600" });
-    svg.appendChild(icoWaveform(c2x + 62, rowTopY + 58, 20, 2.1, "var(--accent)"));
-    svg.appendChild(svgEl("line", { x1: c2x + 14, y1: rowTopY + 80, x2: c2x + c2w - 14, y2: rowTopY + 80, class: "grid-line" }));
-    svg.appendChild(icoWaveform(c2x + 50, rowTopY + 110, 30, 1.5, "var(--ink)"));
-    line(c2x + c2w / 2, rowTopY + 140, "SNR = 10, 5, 0 dB", { "text-anchor": "middle", style: "font-size:10px; fill: var(--ink-soft)" });
+    layout([
+      rTitle(c2cx, "Controlled Mixture"),
+      rBand(20, 9, true, function (top) {
+        var cy = top + 10;
+        svg.appendChild(icoWaveform(c2cx - 33, cy, 20, 0.9, "var(--ink-soft)"));
+        svg.appendChild(icoWaveform(c2cx + 13, cy, 20, 2.1, "var(--accent)"));
+        lineAt(c2cx, cy + 4, "+", { style: "font-size:12px; font-weight:600; fill: var(--ink)" });
+      }),
+      rRule(c2x + 16, c2x + c2w - 16),
+      rIcon(20, function (cy) { return icoWaveform(c2cx - 15, cy, 30, 1.5, "var(--ink)"); }),
+      rText(c2cx, "SNR = 10, 5, 0 dB", { style: "font-size:10px; fill: var(--ink-soft)" })
+    ], rowTopY, rowH1, 22);
 
-    arrowH(c1x + c1w, c2x, rowTopY + subH / 2);
-    var midY = rowTopY + subH / 2, lowY = c1by + subH / 2, joinX = c1x + c1w + 20;
-    svg.appendChild(svgEl("path", { d: "M " + (c1x + c1w) + " " + lowY + " L " + joinX + " " + lowY + " L " + joinX + " " + (midY + 6), fill: "none", stroke: "var(--ink-soft)", "stroke-width": 1 }));
-    svg.appendChild(svgEl("path", { d: "M " + (joinX - 3.5) + " " + (midY - 3) + " L " + joinX + " " + (midY + 6) + " L " + (joinX + 3.5) + " " + (midY - 3), fill: "none", stroke: "var(--ink-soft)", "stroke-width": 1.2 }));
+    // Both sources feed one merged line into the mixture: plain junction, no
+    // arrowhead between the source boxes — the only head is where it arrives.
+    var midY = rowTopY + subH / 2, lowY = c1by + subH / 2;
+    var joinX = c1x + c1w + 16, mergeY = (midY + lowY) / 2;
+    svg.appendChild(svgEl("path", {
+      d: "M " + (c1x + c1w) + " " + midY + " L " + joinX + " " + midY +
+         " M " + (c1x + c1w) + " " + lowY + " L " + joinX + " " + lowY +
+         " M " + joinX + " " + midY + " L " + joinX + " " + lowY,
+      fill: "none", stroke: "var(--ink-soft)", "stroke-width": 1
+    }));
+    arrowH(joinX, c2x, mergeY);
 
-    // column 3: speech LLM evaluation
-    var c3x = c2x + c2w + 46, c3w = 148;
+    /* -- column 3: speech LLM evaluation -- */
+    var c3x = c2x + c2w + 46, c3w = 148, c3cx = c3x + c3w / 2;
     box(c3x, rowTopY, c3w, rowH1);
-    svg.appendChild(icoMic(c3x + c3w / 2, rowTopY + 34));
-    title(c3x, rowTopY + 60, c3w, "Speech LLMs");
-    ["Qwen2-Audio", "Qwen2.5-Omni 3B/7B", "Phi-4-MM", "Gemma 3n"].forEach(function (t, i) { line(c3x + c3w / 2, rowTopY + 82 + i * 15, t, { "text-anchor": "middle" }); });
+    layout([
+      rTitle(c3cx, "Speech LLMs"),
+      rIcon(22, function (cy) { return icoMic(c3cx, cy - 1); }),
+      rText(c3cx, "Qwen2-Audio"),
+      rText(c3cx, "Qwen2.5-Omni 3B/7B"),
+      rText(c3cx, "Phi-4-MM"),
+      rText(c3cx, "Gemma 3n")
+    ], rowTopY, rowH1, 22);
     arrowH(c2x + c2w, c3x, rowTopY + rowH1 / 2);
 
-    // column 4: paired evaluation
-    var c4x = c3x + c3w + 46, c4w = 168;
+    /* -- column 4: paired evaluation -- */
+    var c4x = c3x + c3w + 46, c4w = 168, c4cx = c4x + c4w / 2;
     box(c4x, rowTopY, c4w, rowH1);
-    title(c4x, rowTopY + 16, c4w, "Paired Evaluation");
-    line(c4x + c4w / 2, rowTopY + 40, "Clean vs. noisy output", { "text-anchor": "middle" });
-    line(c4x + c4w / 2, rowTopY + 66, "Δt = St(noisy) − St(clean)", { "text-anchor": "middle", style: "font-size:10.5px; fill: var(--ink); font-weight:600" });
-    svg.appendChild(svgEl("line", { x1: c4x + 14, y1: rowTopY + 80, x2: c4x + c4w - 14, y2: rowTopY + 80, class: "grid-line" }));
-    line(c4x + c4w / 2, rowTopY + 104, "ASR → WER", { "text-anchor": "middle" });
-    line(c4x + c4w / 2, rowTopY + 122, "KWS → Accuracy", { "text-anchor": "middle" });
+    layout([
+      rTitle(c4cx, "Paired Evaluation"),
+      rText(c4cx, "Clean vs. noisy output", null, 8, true),
+      rText(c4cx, "Δt = St(noisy) − St(clean)", { style: "font-size:9.5px; fill: var(--ink); font-weight:600" }, 8, true),
+      rRule(c4x + 16, c4x + c4w - 16, 8),
+      rText(c4cx, "ASR → WER"),
+      rText(c4cx, "KWS → Accuracy")
+    ], rowTopY, rowH1, 20);
     arrowH(c3x + c3w, c4x, rowTopY + rowH1 / 2);
 
-    // column 5: benchmark analyses (tall, 2x2 icon grid)
-    var c5x = c4x + c4w + 46, c5w = 196;
+    /* -- column 5: benchmark analyses, 2 x 2 -- */
+    var c5x = c4x + c4w + 46, c5w = 196, c5cx = c5x + c5w / 2;
     box(c5x, rowTopY, c5w, rowH1);
-    title(c5x, rowTopY + 16, c5w, "Benchmark Analyses");
-    var qx = [c5x + 46, c5x + c5w - 46], qy = [rowTopY + 64, rowTopY + 134];
-    svg.appendChild(icoScatter(qx[0], qy[0])); line(qx[0], qy[0] + 22, "Descriptor rs", { "text-anchor": "middle" });
-    svg.appendChild(icoBars(qx[1], qy[0])); line(qx[1], qy[0] + 22, "Bg. ranking", { "text-anchor": "middle" });
-    svg.appendChild(icoPeople(qx[0], qy[1])); line(qx[0], qy[1] + 22, "Fairness", { "text-anchor": "middle" });
-    svg.appendChild(icoGauge(qx[1], qy[1])); line(qx[1], qy[1] + 22, "RER steering", { "text-anchor": "middle" });
+    var qx = [c5x + 50, c5x + c5w - 50];
+    function quadRow(pairs) {
+      return rBand(20 + 6 + T_H, 12, true, function (top) {
+        pairs.forEach(function (p, i) {
+          svg.appendChild(p.make(top + 10));
+          lineAt(qx[i], top + 26 + T_ASC, p.label);
+        });
+      });
+    }
+    layout([
+      rTitle(c5cx, "Benchmark Analyses", 12),
+      quadRow([
+        { label: "Descriptor rs", make: function (cy) { return icoScatter(qx[0], cy); } },
+        { label: "Bg. ranking", make: function (cy) { return icoBars(qx[1], cy - 2.5); } }
+      ]),
+      quadRow([
+        { label: "Fairness", make: function (cy) { return icoPeople(qx[0], cy); } },
+        { label: "RER steering", make: function (cy) { return icoGauge(qx[1], cy - 1); } }
+      ])
+    ], rowTopY, rowH1, 22);
     arrowH(c4x + c4w, c5x, rowTopY + rowH1 / 2);
 
-    // row 2: acoustic descriptor extraction, dashed into Benchmark Analyses
-    var r2y = rowTopY + rowH1 + 32, r2h = 80;
-    var descX = c1x, descW = c2x + c2w - c1x;
+    /* -- row 2: acoustic descriptor extraction, dashed into the analyses box -- */
+    var r2y = rowTopY + rowH1 + 32, r2h = 76;
+    var descX = c1x, descW = c2x + c2w - c1x, descCx = descX + descW / 2;
     box(descX, r2y, descW, r2h);
     arrowV(c1x + c1w / 2, c1by + subH, r2y);
-    title(descX, r2y + 17, descW, "Acoustic Descriptor Extraction");
-    line(descX + descW / 2, r2y + 38, "ZCR · Centroid · Rolloff · Bandwidth", { "text-anchor": "middle" });
-    line(descX + descW / 2, r2y + 55, "Flux · Contrast · Flatness · RMS Var.", { "text-anchor": "middle" });
+    layout([
+      rTitle(descCx, "Acoustic Descriptor Extraction"),
+      rText(descCx, "ZCR · Centroid · Rolloff · Bandwidth"),
+      rText(descCx, "Flux · Contrast · Flatness · RMS Var.")
+    ], r2y, r2h, 6);
 
     var dashY = r2y + r2h / 2, dashX2 = c5x + c5w / 2;
     svg.appendChild(svgEl("path", {
@@ -286,10 +369,10 @@
       fill: "none", stroke: "var(--ink-soft)", "stroke-width": 1, "stroke-dasharray": "3 3"
     }));
     svg.appendChild(svgEl("path", {
-      d: "M " + (dashX2 - 3.5) + " " + (rowTopY + rowH1 - 8) + " L " + dashX2 + " " + (rowTopY + rowH1) + " L " + (dashX2 + 3.5) + " " + (rowTopY + rowH1 - 8),
+      d: "M " + (dashX2 - 3.5) + " " + (rowTopY + rowH1 + 8) + " L " + dashX2 + " " + (rowTopY + rowH1) + " L " + (dashX2 + 3.5) + " " + (rowTopY + rowH1 + 8),
       fill: "none", stroke: "var(--ink-soft)", "stroke-width": 1.2
     }));
-    line((descX + descW + dashX2) / 2, dashY - 10, "extracted independently — used only for analysis", { "text-anchor": "middle", style: "font-size:9.5px; fill: var(--muted); font-style: italic" });
+    lineAt((descX + descW + dashX2) / 2, dashY - 9, "extracted independently — used only for analysis", { style: "font-size:9.5px; fill: var(--muted); font-style: italic" });
 
     host.innerHTML = "";
     host.appendChild(svg);
@@ -386,7 +469,7 @@
 
       var valX = val >= 0 ? zeroX + val * scale + 6 : zeroX + val * scale - 6;
       var valLab = svgEl("text", {
-        x: valX, y: y + rowH / 2 + 4, "text-anchor": val >= 0 ? "start" : "end", class: "bar-label",
+        x: valX, y: y + rowH / 2 + 4, "text-anchor": val >= 0 ? "start" : "end", class: "bar-label val-label",
         style: compact ? "font-size:9.5px" : ""
       });
       valLab.textContent = fmt3(val) + (starFn(d) ? "*" : "");
@@ -608,7 +691,7 @@
         var rect = svgEl("rect", { x: x, y: y, width: barW, height: yFor(0) - y, fill: color, rx: 1 });
         svg.appendChild(rect);
 
-        var lab = svgEl("text", { x: x + barW / 2, y: y - 5, "text-anchor": "middle", class: "bar-label" });
+        var lab = svgEl("text", { x: x + barW / 2, y: y - 5, "text-anchor": "middle", class: "bar-label val-label" });
         lab.textContent = val.toFixed(2);
         svg.appendChild(lab);
 

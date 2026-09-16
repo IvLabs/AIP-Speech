@@ -7,10 +7,11 @@ Reads downloaded corpora and produces:
   itembanks/kws.jsonl  : {id, wav, keyword, is_target, probe_id?}
 
 All audio paths are RELATIVE to ROOT so the project is portable.
-Common Voice is STREAMED (never written to disk).
+Common Voice is streamed; only the clips we keep are saved, under
+data/speech_asr/common_voice/.
 
 Usage:
-  python scripts/02_build_banks.py                # full run (resumable)
+  python scripts/02_build_banks.py
 """
 from __future__ import annotations
 
@@ -44,7 +45,6 @@ KWS_TARGETS = [
 ]
 
 
-# ── LibriSpeech → asr.jsonl ──────────────────────────────────────────────────
 def build_asr_bank(prog: ProgressLog) -> None:
     key = "asr_bank"
     if prog.done(key):
@@ -54,8 +54,8 @@ def build_asr_bank(prog: ProgressLog) -> None:
     done_ids = jsonl_ids(ASR_BANK)
     items: list[dict] = []
 
-    # Load speaker metadata for gender
-    speakers_file = DATA / "speech_asr" / "LibriSpeech" / "SPEAKERS.TXT"
+    # gender comes from SPEAKERS.TXT, not the transcript files
+    speakers_file =DATA / "speech_asr" / "LibriSpeech" / "SPEAKERS.TXT"
     speaker_gender = {}
     if speakers_file.exists():
         with open(speakers_file) as f:
@@ -68,7 +68,6 @@ def build_asr_bank(prog: ProgressLog) -> None:
                     gender = "female" if parts[1] == "F" else "male" if parts[1] == "M" else "unknown"
                     speaker_gender[spk_id] = gender
 
-    # Collect from test-clean and test-other
     for split in ["test-clean", "test-other"]:
         trans_files = sorted(
             (DATA / "speech_asr" / "LibriSpeech" / split).rglob("*.trans.txt")
@@ -94,7 +93,7 @@ def build_asr_bank(prog: ProgressLog) -> None:
                         "age": "unknown",
                     })
 
-    # Balance across splits
+    # shuffle first so both splits survive the cap at ASR_N
     rng = random.Random(RANDOM_SEED)
     rng.shuffle(items)
     for item in items[:ASR_N]:
@@ -102,14 +101,13 @@ def build_asr_bank(prog: ProgressLog) -> None:
             jsonl_append(ASR_BANK, item)
             done_ids.add(item["id"])
 
-    # Supplement with Common Voice (streamed) to get accent/gender diversity
+    # LibriSpeech alone gives no accent spread — top up from Common Voice
     _augment_asr_with_cv(done_ids, len(done_ids) + CV_N, prog)
     prog.mark(key)
     log.info(f"[done] ASR bank: {len(jsonl_ids(ASR_BANK))} items.")
 
 
 def _augment_asr_with_cv(done_ids: set, target: int, prog: ProgressLog) -> None:
-    """Stream Common Voice validation split to add accent/gender-labelled items."""
     existing = len(done_ids)
     if existing >= target:
         return
@@ -138,7 +136,7 @@ def _augment_asr_with_cv(done_ids: set, target: int, prog: ProgressLog) -> None:
             utt_id = f"cv_{ex['client_id'][:8]}_{added}"
             if utt_id in done_ids:
                 continue
-            # Save the audio clip to disk so it's accessible during inference
+            # the stream is not replayable at inference time, so keep the clip
             out = DATA / "speech_asr" / "common_voice" / f"{utt_id}.wav"
             out.parent.mkdir(parents=True, exist_ok=True)
             if not out.exists():
@@ -161,7 +159,6 @@ def _augment_asr_with_cv(done_ids: set, target: int, prog: ProgressLog) -> None:
         log.warning(f"[CV] Could not stream Common Voice: {e}. Skipping.")
 
 
-# ── Speech Commands → kws.jsonl ──────────────────────────────────────────────
 def build_kws_bank(prog: ProgressLog) -> None:
     key = "kws_bank"
     if prog.done(key):
@@ -173,7 +170,6 @@ def build_kws_bank(prog: ProgressLog) -> None:
     rng = random.Random(RANDOM_SEED)
 
     items: list[dict] = []
-    # Target keywords
     for kw in KWS_TARGETS:
         wav_files = sorted((kws_root / kw).glob("*.wav")) if (kws_root / kw).exists() else []
         rng.shuffle(wav_files)
@@ -200,9 +196,8 @@ def build_kws_bank(prog: ProgressLog) -> None:
             })
 
     # Injection probes: held-out Speech Commands clips that *say* the target word.
-    # These are used as background sounds in E2.  We fix 3 probes per target keyword.
     probe_ids: list[str] = []
-    for kw in KWS_TARGETS[:4]:  # use first 4 keywords as injection targets
+    for kw in KWS_TARGETS[:4]:
         wav_files = sorted((kws_root / kw).glob("*.wav")) if (kws_root / kw).exists() else []
         probes = wav_files[-3:] if len(wav_files) >= 3 else wav_files
         for w in probes:
@@ -216,8 +211,8 @@ def build_kws_bank(prog: ProgressLog) -> None:
                 "probe_id": pid,
             })
 
-    # Write probe IDs to prereg so they're frozen
-    prereg_probe = ROOT / "prereg" / "injection_probe_ids.json"
+    # frozen once, so TIR is always scored against the same probes
+    prereg_probe =ROOT / "prereg" / "injection_probe_ids.json"
     prereg_probe.parent.mkdir(parents=True, exist_ok=True)
     if not prereg_probe.exists():
         prereg_probe.write_text(json.dumps(probe_ids, indent=2))
@@ -233,7 +228,6 @@ def build_kws_bank(prog: ProgressLog) -> None:
     log.info(f"[done] KWS bank: {len(jsonl_ids(KWS_BANK))} items.")
 
 
-# ── main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 2 — Build foreground item banks")
     ap.parse_args()

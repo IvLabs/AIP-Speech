@@ -2,7 +2,7 @@ import modal
 import subprocess
 import os
 
-# Define the environment with PyTorch and required dependencies from requirements.txt
+# GPU image: CUDA base plus everything the pipeline imports
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.10")
     .env({"FORCE_BUILD": "phi4-fix-v3"})
@@ -58,7 +58,6 @@ image = (
     .run_commands("CC=gcc CXX=g++ pip install flash-attn --no-build-isolation")
 )
 
-# Define the local mount path
 LOCAL_AIP_SPEECH_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 image = image.add_local_dir(
@@ -77,7 +76,7 @@ image = image.add_local_dir(
     ]
 )
 
-# Mount only the curated 49MB data subset required for the active manifests
+# only the 49 MB subset the active manifests actually reference
 image = image.add_local_dir(
     os.path.join(LOCAL_AIP_SPEECH_DIR, "data_subset", "data"),
     remote_path="/workspace/data"
@@ -85,11 +84,10 @@ image = image.add_local_dir(
 
 app = modal.App("aip-speech-inference")
 
-# Define persistent volumes
-# One for caching model weights so they are not downloaded every run
+# model weights, so a rerun doesn't re-download them
 cache_volume = modal.Volume.from_name("aip-models-cache", create_if_missing=True)
-# One for storing inference results to be synced locally
-inference_volume = modal.Volume.from_name("aip-inference-out", create_if_missing=True)
+# inference output, pulled down to the local machine as the run progresses
+inference_volume =modal.Volume.from_name("aip-inference-out", create_if_missing=True)
 
 hf_secret = modal.Secret.from_dict({"HF_TOKEN": os.environ["HF_TOKEN"]}) if os.environ.get("HF_TOKEN") else None
 secrets = [hf_secret] if hf_secret else []
@@ -108,18 +106,15 @@ def run_inference(model: str = "all", task: str = "all"):
     import sys
     import time
 
-    # Change working directory to the workspace
     os.chdir("/workspace")
 
-    # Build the command string
     cmd = ["python", "scripts/05_inference.py", "--model", model, "--task", task]
 
     print(f"Running command: {' '.join(cmd)}")
-    
-    # Execute the underlying script and stream output
+
     proc = subprocess.Popen(cmd)
-    
-    # Periodically commit changes on the inference volume to ensure they are available for syncing
+
+    # commit as we go, otherwise nothing is visible to sync until the run ends
     while True:
         ret = proc.poll()
         if ret is not None:
@@ -130,7 +125,6 @@ def run_inference(model: str = "all", task: str = "all"):
             print(f"Volume commit failed: {e}")
         time.sleep(300)  # commit every 5 minutes
     
-    # Final commit
     inference_volume.commit()
     
     if proc.returncode != 0:
@@ -146,15 +140,15 @@ def main(model: str = "all", task: str = "all"):
     import subprocess
 
     timestamp = int(time.time())
-    # Create a unique folder for this run's sync to avoid touching or overwriting other models' local data
-    sync_dir = f"inference_sync_{model}_{timestamp}"
+    # per-run folder, so a sync never overwrites another model's local data
+    sync_dir =f"inference_sync_{model}_{timestamp}"
     print(f"Starting Modal run on L4 GPU. model={model}, task={task}")
     print(f"Local sync directory for this run: {sync_dir}/")
     
     def sync_volume():
         print(f"Starting periodic volume sync to local ./{sync_dir} directory (every 5 mins)...")
         os.makedirs(sync_dir, exist_ok=True)
-        # We only download the directory of the model being run to avoid pulling everything
+        # pull only the model being run, not the whole volume
         remote_path = f"/{model}" if model != "all" else "/"
         while True:
             time.sleep(300)
@@ -165,15 +159,13 @@ def main(model: str = "all", task: str = "all"):
             except Exception as e:
                 print(f"Sync failed: {e}")
                 
-    # Start the sync thread as a daemon so it exits when main exits
+    # daemon, so it dies with main rather than hanging the process
     sync_thread = threading.Thread(target=sync_volume, daemon=True)
     sync_thread.start()
-    
-    # Run the modal function (this will block until it finishes)
+
     try:
         run_inference.remote(model, task)
     finally:
-        # One final sync after it finishes or errors
         print("Run finished or interrupted. Final sync...")
         remote_path = f"/{model}" if model != "all" else "/"
         subprocess.run(["modal", "volume", "get", "aip-inference-out", remote_path, f"{sync_dir}/", "--force"], check=False)

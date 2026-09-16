@@ -12,10 +12,7 @@ Corpora:
   NOISEX-92 babble → data/noisex/
   LibriSpeech test-clean + test-other → data/speech_asr/
   Google Speech Commands v2 → data/speech_kws/
-  (Common Voice is STREAMED at inference, not downloaded)
-
-Usage:
-  python scripts/01_download.py              # full run (resumable)
+  (Common Voice is not downloaded here — Stage 2 streams the clips it needs)
 """
 from __future__ import annotations
 
@@ -33,7 +30,6 @@ except ImportError:
 
 from urllib.request import urlretrieve
 
-# ── project imports ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from utils import ROOT, DATA, get_logger, ProgressLog
 
@@ -41,7 +37,6 @@ log = get_logger("01_download")
 PROGRESS = ROOT / "checks" / "download_progress.json"
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
 def _reporthook(block: int, block_size: int, total: int) -> None:
     if total > 0:
         pct = min(block * block_size / total * 100, 100)
@@ -49,14 +44,12 @@ def _reporthook(block: int, block_size: int, total: int) -> None:
 
 
 def download(url: str, dest: Path, desc: str = "") -> Path:
-    """Download url → dest. Skips if dest already exists and has size > 0."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 0:
         log.info(f"[skip] {desc or dest.name} already downloaded.")
         return dest
     log.info(f"[download] {desc or url}")
     if requests is not None:
-        # streaming download with requests (handles redirects robustly)
         with requests.get(url, stream=True, timeout=60) as r:
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
@@ -71,12 +64,12 @@ def download(url: str, dest: Path, desc: str = "") -> Path:
         print()
     else:
         urlretrieve(url, str(dest), reporthook=_reporthook)
-        print()  # newline after progress
+        print()
     return dest
 
 
 def extract_zip(archive: Path, out_dir: Path) -> None:
-    """Extract a zip archive idempotently (skip if sentinel dir exists)."""
+    """Extract a zip archive into out_dir."""
     out_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive) as z:
         z.extractall(out_dir)
@@ -89,8 +82,6 @@ def extract_tar(archive: Path, out_dir: Path) -> None:
         t.extractall(out_dir)
     log.info(f"[extracted] {archive.name} → {out_dir}")
 
-
-# ── corpus-specific download functions ───────────────────────────────────────
 
 def download_esc50(prog: ProgressLog) -> None:
     """ESC-50: 2000 clips (5 s, 44.1 kHz) — ~600 MB unzipped."""
@@ -108,8 +99,6 @@ def download_esc50(prog: ProgressLog) -> None:
     log.info("[done] ESC-50")
 
 
-# Using 16 kHz versions (project SR=16 kHz) from the Zenodo API endpoint.
-# SPSQUARE and TCAR are not in this Zenodo record; substituting with similar envs.
 MS_SNSD_GIT = "https://github.com/microsoft/MS-SNSD.git"
 
 def download_ms_snsd(prog: ProgressLog) -> None:
@@ -168,7 +157,7 @@ def download_noisex(prog: ProgressLog) -> None:
 
 
 def download_musan(prog: ProgressLog) -> None:
-    """MUSAN: speech + music + noise subsets (~10 GB full; we only keep subsets)."""
+    """MUSAN: speech + music + noise (~10 GB extracted)."""
     key = "musan"
     if prog.done(key):
         log.info("[skip] MUSAN already done.")
@@ -203,14 +192,13 @@ def download_librispeech(prog: ProgressLog) -> None:
 
 
 def download_speech_commands(prog: ProgressLog) -> None:
-    """Google Speech Commands v2 (~2.3 GB; only downloading v2 mini)."""
+    """Google Speech Commands v2, full set (~2.3 GB)."""
     key = "speech_commands_v2"
     if prog.done(key):
         log.info("[skip] Speech Commands v2 already done.")
         return
     dest_dir = DATA / "speech_kws"
-    # Full dataset
-    url = "https://storage.googleapis.com/download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
+    url ="https://storage.googleapis.com/download.tensorflow.org/data/speech_commands_v0.02.tar.gz"
     archive = dest_dir / "speech_commands_v2.tar.gz"
     download(url, archive, "Speech Commands v2")
     extract_tar(archive, dest_dir)
@@ -218,7 +206,6 @@ def download_speech_commands(prog: ProgressLog) -> None:
     log.info("[done] Speech Commands v2")
 
 
-# ── main ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 1 — Download source corpora")
     ap.parse_args()

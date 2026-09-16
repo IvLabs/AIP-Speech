@@ -9,12 +9,11 @@ from pathlib import Path
 
 import numpy as np
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent   # aip-speech/
 DATA = ROOT / "data"
 CACHE = ROOT / "models" / "cache"
 
-# Redirect ALL HuggingFace / torch model downloads into the project directory.
+# keep HuggingFace / torch downloads inside the project directory
 os.environ.setdefault("HF_HOME", str(CACHE))
 os.environ.setdefault("TORCH_HOME", str(CACHE))
 os.environ.setdefault("TRANSFORMERS_CACHE", str(CACHE / "hub"))
@@ -25,11 +24,10 @@ SPEECH_LUFS = -23.0  # speech loudness target
 BG_LUFS = -23.0      # bg loudness target before SNR scaling
 SNR_GRID = [10, 5, 0]
 
-# ── Logging ───────────────────────────────────────────────────────────────────
 def get_logger(name: str) -> logging.Logger:
     log = logging.getLogger(name)
     if not log.handlers:
-        # Force UTF-8 on the stream to avoid UnicodeEncodeError on Windows cp1252 consoles
+        # UTF-8 stream, else Windows cp1252 consoles raise UnicodeEncodeError
         import io
         stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace") \
                  if hasattr(sys.stdout, "buffer") else sys.stdout
@@ -40,7 +38,6 @@ def get_logger(name: str) -> logging.Logger:
     log.setLevel(logging.INFO)
     return log
 
-# ── JSONL helpers ─────────────────────────────────────────────────────────────
 def jsonl_append(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
@@ -55,7 +52,6 @@ def jsonl_read(path: Path) -> list[dict]:
 def jsonl_ids(path: Path, key: str = "id") -> set:
     return {r[key] for r in jsonl_read(path) if key in r and r.get("raw") != "__ERROR__"}
 
-# ── CSV helpers ───────────────────────────────────────────────────────────────
 def csv_append(path: Path, row: dict, fieldnames: list[str] | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not path.exists()
@@ -66,7 +62,6 @@ def csv_append(path: Path, row: dict, fieldnames: list[str] | None = None) -> No
             w.writeheader()
         w.writerow(row)
 
-# ── Audio helpers ─────────────────────────────────────────────────────────────
 def load_audio(path: Path | str, sr: int = SR) -> np.ndarray:
     """Load mono float32 at project SR."""
     import soundfile as sf
@@ -86,11 +81,10 @@ def loudness_normalize(x: np.ndarray, target_lufs: float) -> np.ndarray:
         return x
     return pyln.normalize.loudness(x, measured, target_lufs).astype(np.float32)
 
-# ── Deterministic file-based progress tracker ─────────────────────────────────
 class ProgressLog:
     """
     Tiny key-value store backed by a JSON file.
-    Use to record completed IDs so a script can resume after interruption.
+    Records completed IDs so a script can resume after interruption.
     """
     def __init__(self, path: Path):
         self.path = path
@@ -107,7 +101,6 @@ class ProgressLog:
     def __len__(self) -> int:
         return len(self._data)
 
-# ── Misc ──────────────────────────────────────────────────────────────────────
 def file_md5(path: Path, chunk: int = 1 << 20) -> str:
     h = hashlib.md5()
     with open(path, "rb") as f:

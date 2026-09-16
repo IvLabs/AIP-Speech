@@ -19,7 +19,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import transformers.modeling_utils
 transformers.modeling_utils.caching_allocator_warmup = lambda *args, **kwargs: None
 
-# Global Compatibility Monkey-patches
+# shims for transformers / peft version drift
 try:
     import peft.utils.other
     import peft.tuners.tuners_utils
@@ -76,7 +76,6 @@ log = get_logger("05_inference")
 MANIFESTS  = ROOT / "manifests"
 INFER_DIR  = ROOT / "inference"
 
-# ── task prompts ──────────────────────────────────────────────────────────────
 PROMPTS = {
     "asr":  "Transcribe the speech in this audio clip exactly as spoken. "
             "Return only the transcription text.",
@@ -164,12 +163,11 @@ PROMPTS = {
 }
 
 
-# ── model adapters ────────────────────────────────────────────────────────────
-# Max audio length to prevent KV-cache OOM on 16 GB GPU
+# longer clips blow the KV cache on a 16 GB GPU
 MAX_AUDIO_SAMPLES = SR * 30   # 30 seconds
 
 class SpeechLLM:
-    """Abstract adapter. Subclasses implement _load() and generate()."""
+    """Abstract adapter. Subclasses load in __init__ and implement generate()."""
     model_id: str
 
     def generate(self, wav: np.ndarray, task_prompt: str,
@@ -195,7 +193,6 @@ def _clip_audio(wav: np.ndarray) -> np.ndarray:
     return wav
 
 
-# ── Qwen2.5-Omni-3B (Thinker-only) ──────────────────────────────────────────
 class Qwen25Omni3B(SpeechLLM):
     model_id = "qwen25_omni_3b"
 
@@ -237,7 +234,6 @@ class Qwen25Omni3B(SpeechLLM):
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
 
-# ── Qwen2.5-Omni-7B (Thinker-only, 8-bit) ────────────────────────────────────
 class Qwen25Omni7B(SpeechLLM):
     model_id = "qwen25_omni_7b"
 
@@ -280,7 +276,6 @@ class Qwen25Omni7B(SpeechLLM):
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
 
-# ── Qwen2-Audio-7B (8-bit) ───────────────────────────────────────────────────
 class Qwen2Audio7B(SpeechLLM):
     model_id = "qwen2_audio_7b"
 
@@ -321,7 +316,6 @@ class Qwen2Audio7B(SpeechLLM):
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
 
-# ── Phi-4-multimodal (4-bit) ─────────────────────────────────────────────────
 class Phi4Multimodal(SpeechLLM):
     model_id = "phi4_multimodal"
 
@@ -333,15 +327,13 @@ class Phi4Multimodal(SpeechLLM):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         MODEL_ID = "microsoft/phi-4-multimodal-instruct"
 
-        # Download model files to cache (skips download if already cached)
         model_dir = snapshot_download(
             MODEL_ID,
             cache_dir=_cache(),
         )
 
-        # Directly patch config.json: phi4's own __init__ reads _attn_implementation
-        # from the config object which is populated from this file. The baked-in value
-        # is "flash_attention_2" which phi4's code explicitly rejects.
+        # phi4's __init__ reads _attn_implementation straight off the config file,
+        # and the baked-in "flash_attention_2" is a value its own code rejects
         config_path = os.path.join(model_dir, "config.json")
         with open(config_path) as f:
             cfg_json = json.load(f)
@@ -351,10 +343,8 @@ class Phi4Multimodal(SpeechLLM):
             with open(config_path, "w") as f:
                 json.dump(cfg_json, f, indent=2)
 
-        # Step 2.5: Patch speech_conformer_encoder.py to avoid meta tensor item() crash
-        # When transformers loads the model, it creates tensors on the meta device.
-        # This breaks in_length = torch.tensor(feat_in) -> int(out_length).
-        # Forcing device='cpu' fixes it.
+        # the encoder builds a tensor that ends up on the meta device during
+        # loading, and int() on a meta tensor throws — pin it to CPU instead
         encoder_path = os.path.join(model_dir, "speech_conformer_encoder.py")
         if os.path.exists(encoder_path):
             with open(encoder_path, "r") as f:
@@ -380,8 +370,8 @@ class Phi4Multimodal(SpeechLLM):
                     f.write(mod_code)
 
 
-        # Load using the MODEL ID so the trust_remote_code module loader 
-        # correctly resolves the symlinked .py files in the cache volume.
+        # load by model id, not by path — the trust_remote_code loader needs
+        # that to resolve the symlinked .py files in the cache volume
         self.processor = AutoProcessor.from_pretrained(
             MODEL_ID, cache_dir=_cache(), trust_remote_code=True)
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -411,7 +401,6 @@ class Phi4Multimodal(SpeechLLM):
         return self.processor.tokenizer.decode(out[0], skip_special_tokens=True).strip()
 
 
-# ── Gemma 3n-E4B ─────────────────────────────────────────────────────────────
 class Gemma3nE4B(SpeechLLM):
     model_id = "gemma3n_e4b"
 
@@ -449,7 +438,6 @@ class Gemma3nE4B(SpeechLLM):
         return self.processor.decode(out[0], skip_special_tokens=True).strip()
 
 
-# Registry
 MODEL_CLASSES: dict[str, type[SpeechLLM]] = {
     "qwen25_omni_3b":  Qwen25Omni3B,
     "qwen25_omni_7b":  Qwen25Omni7B,
@@ -465,7 +453,6 @@ ALL_TASKS  = [
 ]
 
 
-# ── manifest generation ───────────────────────────────────────────────────────
 def build_manifests() -> None:
     """Generate manifests/asr.csv and manifests/kws.csv if not present."""
     import pandas as pd
@@ -475,14 +462,12 @@ def build_manifests() -> None:
         log.warning("[manifest] Battery not found. Run Stage 3 first.")
         return
 
-    # ASR manifest
     asr_path = MANIFESTS / "asr.csv"
     if not asr_path.exists():
         items = jsonl_read(ROOT / "itembanks" / "asr.jsonl")
         rows = []
         seed = 0
         for item in items:
-            # clean (no background)
             rows.append({
                 "id": f"{item['id']}_clean",
                 "speech_id": item["id"],
@@ -517,7 +502,6 @@ def build_manifests() -> None:
         pd.DataFrame(rows).to_csv(asr_path, index=False)
         log.info(f"[manifest] asr.csv: {len(rows)} rows → {asr_path}")
 
-    # KWS manifest
     kws_path = MANIFESTS / "kws.csv"
     if not kws_path.exists():
         items = jsonl_read(ROOT / "itembanks" / "kws.jsonl")
@@ -566,7 +550,6 @@ def _load_battery() -> list[dict]:
     return pd.read_parquet(bat).to_dict("records")
 
 
-# ── VRAM dry run ──────────────────────────────────────────────────────────────
 def vram_dry_run(model: SpeechLLM) -> None:
     """Run a 1-second silent clip to check VRAM usage."""
     try:
@@ -583,11 +566,10 @@ def vram_dry_run(model: SpeechLLM) -> None:
         log.warning(f"[VRAM dry-run] failed: {e}")
 
 
-# ── inference loop ────────────────────────────────────────────────────────────
 def run_inference_with_model(model: SpeechLLM, model_id: str, task: str) -> None:
     run_key = f"{model_id}_{task}"
 
-    # Resolve manifest: strip steer/pN suffixes to get base task name (asr or kws)
+    # every steer variant reuses the base asr/kws manifest
     manifest_name = task
     for suffix in ["_steer_p1", "_steer_p2", "_steer_p3", "_steer_p4", "_steer_p5", "_steer"]:
         if task.endswith(suffix):
@@ -654,7 +636,7 @@ def run_inference_with_model(model: SpeechLLM, model_id: str, task: str) -> None
                 "id": row["id"], "raw": "__ERROR__", "error": str(e),
                 "model": model_id, "task": task,
             })
-            # Clear CUDA cache after OOM so subsequent rows don't cascade-fail
+            # without this, one OOM cascades into every remaining row
             if "CUDA out of memory" in str(e) or "OutOfMemoryError" in type(e).__name__:
                 import torch
                 gc.collect()
@@ -664,7 +646,6 @@ def run_inference_with_model(model: SpeechLLM, model_id: str, task: str) -> None
     log.info(f"[done] {run_key} → {out_path}")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 5 — Inference")
     ap.add_argument("--model", default="qwen25_omni_3b",
@@ -673,14 +654,13 @@ def main() -> None:
                     choices=ALL_TASKS + ["all"], help="Task to run")
     args = ap.parse_args()
 
-    # Build manifests if needed
     build_manifests()
 
     models = ALL_MODELS if args.model == "all" else [args.model]
     tasks  = ALL_TASKS  if args.task  == "all" else [args.task]
 
     for model_id in models:
-        # Filter tasks that actually have remaining work for this model
+        # skip loading the model at all if nothing is left to run
         tasks_to_run = []
         for task in tasks:
             base_task = "kws" if task.startswith("kws") else "asr"

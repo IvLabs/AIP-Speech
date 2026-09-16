@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-# Allow running from any cwd
+# so this runs from any cwd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from utils import SR, SPEECH_LUFS, loudness_normalize, ROOT, csv_append
 
@@ -26,7 +26,6 @@ _DIAG_FIELDS = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def mix(
     speech: np.ndarray,
     bg: np.ndarray | None,
@@ -37,7 +36,7 @@ def mix(
     """
     Mix speech + background at the requested SNR.
     Both are loudness-normalised before mixing.
-    Returns float32 at SR. Clips to [-1,1] only if needed.
+    Returns float32 at SR, peak-normalised only if the sum would clip.
     """
     s = loudness_normalize(speech, speech_lufs)
     if bg is None:
@@ -68,7 +67,6 @@ def _achieved_snr(y: np.ndarray, s: np.ndarray) -> float:
     return 10.0 * np.log10(ps / pn)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def materialize(row: dict, out_wav: Path) -> None:
     """
     Regenerate the *exact* waveform for a manifest row and write it to disk.
@@ -87,7 +85,6 @@ def _load(path: str | Path) -> np.ndarray:
     return load_audio(path)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 def diagnostics(row: dict, y: np.ndarray, s_norm: np.ndarray) -> dict:
     """
     Compute numeric diagnostics for one stimulus without saving audio.

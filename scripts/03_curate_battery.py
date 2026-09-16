@@ -31,9 +31,7 @@ BG_DIR   = DATA / "bg"
 BATTERY  = ROOT / "descriptors" / "battery.parquet"
 PREREG   = ROOT / "prereg" / "prereg.json"
 
-# ── Battery definition (source → id, category) ───────────────────────────────
-# Each entry: (bg_id, source_glob_pattern, category)
-# source_glob_pattern is relative to DATA
+# (bg_id, glob pattern relative to DATA, category)
 BATTERY_SPEC: list[tuple[str, str, str]] = [
     # ESC-50 non-speech events (~12)
     # Category IDs verified against data/esc50/meta/esc50.csv
@@ -66,7 +64,6 @@ BATTERY_SPEC: list[tuple[str, str, str]] = [
 CLIP_LEN_S = 30  # seconds to trim/loop each background to
 
 
-# ── audio preparation ─────────────────────────────────────────────────────────
 def _prepare_bg(src_path: Path, out_path: Path) -> np.ndarray | None:
     """Load, mono, resample, trim/loop to CLIP_LEN_S, loudness-normalise, save."""
     if not src_path.exists():
@@ -83,10 +80,9 @@ def _prepare_bg(src_path: Path, out_path: Path) -> np.ndarray | None:
     return x
 
 
-# ── descriptor extraction ─────────────────────────────────────────────────────
 def extract_descriptors(x: np.ndarray, bg_id: str) -> dict:
     """
-    Compute all descriptors defined in §2.4 / Table in proposal §3.
+    Compute the pre-registered descriptors for one background.
     Returns a dict suitable for battery.parquet.
     """
     import pyloudnorm as pyln
@@ -94,32 +90,24 @@ def extract_descriptors(x: np.ndarray, bg_id: str) -> dict:
 
     desc: dict = {"bg_id": bg_id}
 
-    # loudness (LUFS)
     meter = pyln.Meter(SR)
     try:
         desc["loudness"] = float(meter.integrated_loudness(x))
     except Exception:
         desc["loudness"] = float("nan")
 
-    # speech_likeness — P(speech) from webrtcvad or silero VAD
     desc["speech_likeness"] = _speech_likeness(x)
-
-    # linguistic_content — Whisper word count × mean confidence on bg alone
     desc["linguistic_content"] = _linguistic_content(x)
 
-    # mod_2to8Hz — temporal envelope modulation energy in 2–8 Hz (syllabic rate)
+    # 2–8 Hz is the syllabic rate band
     desc["mod_2to8Hz"] = _mod_energy(x, f_lo=2.0, f_hi=8.0)
 
-    # spectral_overlap — energy fraction in 300–3400 Hz (telephone band)
+    # 300–3400 Hz is the telephone speech band
     desc["spectral_overlap"] = _spectral_overlap(x)
 
-    # harmonicity (HNR)
     desc["harmonicity"] = _harmonicity(x)
-
-    # stationarity = 1 / mean spectral flux
     desc["stationarity"] = _stationarity(x)
 
-    # onset_density (onsets per second)
     onsets = librosa.onset.onset_detect(y=x, sr=SR, units="time")
     desc["onset_density"] = float(len(onsets) / (len(x) / SR))
 
@@ -133,7 +121,7 @@ def _speech_likeness(x: np.ndarray) -> float:
     frames = [x[i:i+frame_len] for i in range(0, len(x)-frame_len, hop)]
     if not frames:
         return 0.0
-    # Simple energy threshold: speech frames have RMS > 1% of max RMS
+    # count a frame as speech if its RMS is above 1% of the loudest frame
     rms = np.array([float(np.sqrt(np.mean(f**2))) for f in frames])
     thresh = 0.01 * float(rms.max()) if rms.max() > 0 else 0.0
     return float(np.mean(rms > thresh))
@@ -163,10 +151,8 @@ def _linguistic_content(x: np.ndarray) -> float:
 def _mod_energy(x: np.ndarray, f_lo: float, f_hi: float) -> float:
     """Modulation energy of the temporal envelope in [f_lo, f_hi] Hz."""
     from scipy.signal import butter, sosfilt, hilbert
-    # Temporal envelope via Hilbert
     env = np.abs(hilbert(x))
-    # Band-pass the envelope
-    sos = butter(4, [f_lo, f_hi], btype="bandpass", fs=SR, output="sos")
+    sos =butter(4, [f_lo, f_hi], btype="bandpass", fs=SR, output="sos")
     filtered = sosfilt(sos, env)
     total = float(np.mean(env**2)) + 1e-9
     return float(np.mean(filtered**2) / total)
@@ -183,9 +169,7 @@ def _spectral_overlap(x: np.ndarray) -> float:
 
 
 def _harmonicity(x: np.ndarray) -> float:
-    """
-    Harmonic-to-noise ratio proxy: ratio of AC to DC power in autocorrelation.
-    """
+    """Fraction of frames pyin marks as voiced."""
     import librosa
     f0s, voiced, _ = librosa.pyin(x, fmin=50, fmax=400, sr=SR)
     voiced_f0 = f0s[voiced & ~np.isnan(f0s)] if voiced is not None else np.array([])
@@ -201,7 +185,6 @@ def _stationarity(x: np.ndarray) -> float:
     return 1.0 / mean_flux
 
 
-# ── curate battery ────────────────────────────────────────────────────────────
 def curate_battery(prog: ProgressLog) -> None:
     records: list[dict] = []
 
@@ -210,8 +193,8 @@ def curate_battery(prog: ProgressLog) -> None:
         out = BG_DIR / f"{bg_id}.wav"
 
         if prog.done(key):
-            # Already processed — reload WAV from disk and recompute descriptors
-            # so the parquet is always complete even on re-runs.
+            # recompute descriptors from the saved WAV so a re-run still
+            # produces a complete parquet
             if out.exists():
                 log.info(f"[reload] {bg_id} already curated — reloading descriptors from disk.")
                 x = load_audio(out)
@@ -244,7 +227,6 @@ def curate_battery(prog: ProgressLog) -> None:
         records.append(desc)
         prog.mark(key)
 
-    # Save battery.parquet — always write even if records came from cache
     if records:
         import pandas as pd
         BATTERY.parent.mkdir(parents=True, exist_ok=True)
@@ -257,7 +239,6 @@ def curate_battery(prog: ProgressLog) -> None:
     freeze_prereg()
 
 
-# ── pre-registration ──────────────────────────────────────────────────────────
 def freeze_prereg() -> None:
     if PREREG.exists():
         log.info("[prereg] Already frozen. Skipping (nothing changes after first model run).")
@@ -291,7 +272,6 @@ def freeze_prereg() -> None:
     log.info(f"[prereg] Frozen → {PREREG}")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 3 — Curate battery, descriptors")
     ap.parse_args()

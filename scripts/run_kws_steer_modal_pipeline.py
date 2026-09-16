@@ -34,31 +34,26 @@ image = image.add_local_dir(
     ]
 )
 
-# Mount battery descriptors
 image = image.add_local_dir(
     os.path.join(LOCAL_AIP_SPEECH_DIR, "descriptors"),
     remote_path="/workspace/descriptors"
 )
 
-# Mount background noise wavs
 image = image.add_local_dir(
     os.path.join(LOCAL_AIP_SPEECH_DIR, "data", "bg"),
     remote_path="/workspace/data/bg"
 )
 
-# Mount itembanks (including kws_steer.jsonl)
 image = image.add_local_dir(
     os.path.join(LOCAL_AIP_SPEECH_DIR, "itembanks"),
     remote_path="/workspace/itembanks"
 )
 
-# Mount KWS data directory
 image = image.add_local_dir(
     os.path.join(LOCAL_AIP_SPEECH_DIR, "data", "speech_kws"),
     remote_path="/workspace/data/speech_kws"
 )
 
-# Mount manifests
 image = image.add_local_dir(
     os.path.join(LOCAL_AIP_SPEECH_DIR, "manifests"),
     remote_path="/workspace/manifests"
@@ -87,7 +82,7 @@ secrets = [hf_secret] if hf_secret else []
 def run_kws_steer_inference(model: str = "all"):
     os.chdir("/workspace")
     
-    # Symlink results and inference directories to output volume
+    # point inference/ and results/ at the NFS so output survives the container
     os.makedirs("/workspace/kws_steer_output/inference", exist_ok=True)
     os.makedirs("/workspace/kws_steer_output/results", exist_ok=True)
     os.makedirs("/workspace/kws_steer_output/manifests", exist_ok=True)
@@ -99,7 +94,7 @@ def run_kws_steer_inference(model: str = "all"):
     if not os.path.exists("/workspace/results"):
         os.symlink("/workspace/kws_steer_output/results", "/workspace/results")
     
-    # Remove stale kws_steer.csv on volume so 05_inference builds full 6100-item manifest from itembanks
+    # drop any stale kws_steer.csv so 05_inference rebuilds the full manifest
     for p in ["/workspace/manifests/kws_steer.csv", "/workspace/kws_steer_output/manifests/kws_steer.csv"]:
         if os.path.exists(p):
             try: os.remove(p)
@@ -107,7 +102,6 @@ def run_kws_steer_inference(model: str = "all"):
     if not os.path.exists("/workspace/manifests"):
         os.symlink("/workspace/kws_steer_output/manifests", "/workspace/manifests")
 
-    # Run Inference for KWS STEERABILITY task ONLY
     print("\n--- RUNNING KWS STEERABILITY INFERENCE ---")
     cmd_infer = ["python", "scripts/05_inference.py", "--model", model, "--task", "kws_steer_p5"]
 
@@ -116,7 +110,6 @@ def run_kws_steer_inference(model: str = "all"):
     if proc2.returncode != 0:
         raise RuntimeError("Failed KWS STEERABILITY inference")
 
-    # Score KWS STEERABILITY task remotely
     print("\n--- SCORING KWS STEERABILITY METRICS ---")
     cmd_score = ["python", "scripts/06_score_metrics.py"]
 

@@ -39,19 +39,16 @@ def _load_battery() -> pd.DataFrame:
     p = ROOT / "descriptors" / "battery.parquet"
     if not p.exists():
         return pd.DataFrame()
-    df = pd.read_parquet(p)
-    if "category" in df.columns:
-    return df
+    return pd.read_parquet(p)
 
 
-# ── C-PROFILE: mixed-effects regression ──────────────────────────────────────
 def c_profile() -> None:
     """
     Δ ~ SNR + speech_likeness + linguistic_content + mod_2to8Hz +
         spectral_overlap + stationarity + onset_density + (1|item) + (1|model) + (1|background)
 
-    Uses statsmodels OLS as a practical approximation; random effects via
-    dummy-encoding item/model/background then dropping them from output.
+    Approximated with OLS: the random effects become one per-group mean ΔWER
+    column each, which are fitted but left out of the reported table.
     """
     log.info("[C-PROFILE] Running descriptor regression...")
     asr = _load("e1_asr.csv")
@@ -73,13 +70,13 @@ def c_profile() -> None:
         log.warning("[C-PROFILE] Too few descriptor columns available.")
         return
 
-    # Standardise predictors
+    # standardise so the coefficients are comparable across descriptors
     df_model = df[avail + ["dwer", "model", "speech_id", "background_id"]].dropna()
     for col in avail:
         mu, sd = df_model[col].mean(), df_model[col].std() + 1e-9
         df_model[col] = (df_model[col] - mu) / sd
 
-    # Group dummies as random-effect proxies (mean-center per group)
+    # stand-in for the random effects: one group-mean column per factor
     for grp in ["model", "speech_id", "background_id"]:
         if grp in df_model.columns:
             group_means = df_model.groupby(grp)["dwer"].transform("mean")
@@ -91,7 +88,6 @@ def c_profile() -> None:
     y = df_model["dwer"].astype(float)
     res = sm.OLS(y, X).fit()
 
-    # VIF
     from statsmodels.stats.outliers_influence import variance_inflation_factor
     vif_data = []
     for i, col in enumerate(X.columns):
@@ -101,7 +97,6 @@ def c_profile() -> None:
             v = float("nan")
         vif_data.append({"predictor": col, "vif": round(v, 2)})
 
-    # Build output table
     records = []
     for col in avail:
         if col not in res.params.index:
@@ -119,10 +114,9 @@ def c_profile() -> None:
     pd.DataFrame(records).to_csv(RESULTS / "profile_regression.csv", index=False)
     log.info(f"[C-PROFILE] Saved profile_regression.csv. R²={res.rsquared:.3f}")
 
-    # KWS version (if available)
     kws = _load("e1_kws.csv")
     if not kws.empty:
-        # Use miss rate as the outcome (higher miss = worse)
+        # miss rate stands in for ΔWER on the KWS side
         kws_merged = kws.merge(battery, on="background_id", how="left")
         kws_merged = kws_merged[kws_merged["condition"] == "noisy"]
         avail_kws = [c for c in DESCRIPTORS if c in kws_merged.columns]
@@ -152,7 +146,6 @@ def c_profile() -> None:
             log.info(f"[C-PROFILE] KWS added. R²={res2.rsquared:.3f}")
 
 
-# ── C-FAIR: disparity analysis ────────────────────────────────────────────────
 def c_fair() -> None:
     log.info("[C-FAIR] Fairness analysis...")
     e3 = _load("e3_fairness.csv")
@@ -177,7 +170,7 @@ def c_fair() -> None:
     pd.DataFrame(records).to_csv(RESULTS / "fairness_summary.csv", index=False)
     log.info("[C-FAIR] → fairness_summary.csv")
 
-    # Paired permutation test for disparity claim
+    # the reported gap needs a significance test to be claimable
     e1 = _load("e1_asr.csv")
     if not e1.empty and "accent" in e1.columns and "dwer" in e1.columns:
         _permutation_test_disparity(e1)
@@ -215,7 +208,6 @@ def _permutation_test_disparity(df: pd.DataFrame, n_perm: int = 1000) -> None:
     )
 
 
-# ── C-INJECT: injection analysis ─────────────────────────────────────────────
 def c_inject() -> None:
     log.info("[C-INJECT] Injection analysis...")
     e2_asr = _load("e2_asr.csv")
@@ -241,7 +233,6 @@ def c_inject() -> None:
     log.info("[C-INJECT] → injection_summary.csv")
 
 
-# ── main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     ap = argparse.ArgumentParser(description="Stage 7 — Analysis")
     ap.parse_args()

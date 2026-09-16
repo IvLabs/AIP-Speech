@@ -1,27 +1,32 @@
 /* ==========================================================================
    AIP-Speech — "Technical Memorandum" direction
-   Cream stock, dense serif, mono instrument labels, hairline rules.
+   Cool grey stock, dense serif, mono instrument labels, hairline rules.
+
+   Light only, by design: `color-scheme: light` plus the matching <meta> in
+   index.html pin the page to this palette even when the OS/browser is set to
+   dark, so every reader sees the same thing. There is deliberately no
+   prefers-color-scheme block — adding one would reintroduce a second theme.
    ========================================================================== */
 
 :root {
-  color-scheme: light;
+  color-scheme: light only;
 
-  /* -- paper / ink -------------------------------------------------- */
+  /* -- paper / ink (contrast vs --paper noted; all cool-neutral) ----- */
   --paper:      #D9DDE5;
-  --panel:      #E3E6EC;
-  --ink:        #1E1A13;
-  --ink-soft:   #55503F;
-  --muted:      #8A8371;
-  --rule:       #D9D3C4;
-  --rule-strong:#C3BBA6;
-  --accent:     #B5432B;
-  --accent-ink: #FBF9F3;
-  --accent-soft:rgba(181, 67, 43, 0.12);
-  --shadow:     rgba(30, 26, 19, 0.08);
+  --panel:      #E8EBF1;
+  --ink:        #14171D;           /* 13.2:1 */
+  --ink-soft:   #464E5C;           /*  6.2:1 */
+  --muted:      #5A6270;           /*  4.5:1 — AA for the small mono labels */
+  --rule:       #B2BBC9;           /*  1.4:1 — subtle hairline divider */
+  --rule-strong:#717B8D;           /*  3.1:1 — meaningful box boundary */
+  --accent:     #A93A22;           /*  4.7:1 — AA for link text */
+  --accent-ink: #FFFFFF;
+  --accent-soft:rgba(169, 58, 34, 0.12);
+  --shadow:     rgba(20, 23, 29, 0.10);
 
   /* -- chart chrome (dataviz skill: chart surface / gridline / axis) - */
   --chart-surface: var(--panel);
-  --chart-grid:    #CBCFD8;
+  --chart-grid:    #C5CCD8;
   --chart-axis:    var(--rule-strong);
   --chart-label:   var(--muted);
 
@@ -37,57 +42,6 @@
 
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --paper:      #14161B;
-    --panel:      #1A1D23;
-    --ink:        #E6E8ED;
-    --ink-soft:   #ABB0BB;
-    --muted:      #7B8087;
-    --rule:       #2A2D33;
-    --rule-strong:#3A3E46;
-    --accent:     #E2703F;
-    --accent-ink: #15130F;
-    --accent-soft:rgba(226, 112, 63, 0.16);
-    --shadow:     rgba(0, 0, 0, 0.4);
-
-    --chart-surface: var(--panel);
-    --chart-grid:    #24272D;
-    --chart-axis:    var(--rule-strong);
-    --chart-label:   var(--muted);
-
-    --m-qwen2audio: #3987e5;
-    --m-omni7b:     #d95926;
-    --m-omni3b:     #199e70;
-    --m-phi4mm:     #c98500;
-    --m-gemma3n:    #d55181;
-  }
-}
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --paper:      #14161B;
-  --panel:      #1A1D23;
-  --ink:        #E6E8ED;
-  --ink-soft:   #ABB0BB;
-  --muted:      #7B8087;
-  --rule:       #2A2D33;
-  --rule-strong:#3A3E46;
-  --accent:     #E2703F;
-  --accent-ink: #15130F;
-  --accent-soft:rgba(226, 112, 63, 0.16);
-  --shadow:     rgba(0, 0, 0, 0.4);
-  --chart-surface: var(--panel);
-  --chart-grid:    #24272D;
-  --chart-axis:    var(--rule-strong);
-  --chart-label:   var(--muted);
-  --m-qwen2audio: #3987e5;
-  --m-omni7b:     #d95926;
-  --m-omni3b:     #199e70;
-  --m-phi4mm:     #c98500;
-  --m-gemma3n:    #d55181;
 }
 
 /* -- reset ----------------------------------------------------------- */
@@ -116,7 +70,7 @@ a { color: var(--accent); text-decoration-color: color-mix(in srgb, var(--accent
 a:hover { text-decoration-thickness: 2px; }
 
 .wrap {
-  max-width: 860px;
+  max-width: 980px;
   margin: 0 auto;
   padding-inline: 24px;
 }
@@ -136,27 +90,6 @@ a:hover { text-decoration-thickness: 2px; }
   padding-block: 56px 48px;
   border-bottom: 1px solid var(--rule);
   position: relative;
-}
-
-.stamp {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 999px;
-  padding: 5px 12px 5px 10px;
-  margin-bottom: 28px;
-}
-.stamp__id {
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.12em;
-  color: var(--ink-soft);
-}
-.stamp__ring {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .kicker {
@@ -281,6 +214,25 @@ a:hover { text-decoration-thickness: 2px; }
 /* ==========================================================================
    Pipeline diagram
    ========================================================================== */
+/* The two containers that legitimately scroll sideways (a wide data table, the
+   diagram on narrow screens) get a thin on-palette scrollbar instead of the
+   chunky default one. */
+.table-wrap, #pipeline-diagram {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+.table-wrap::-webkit-scrollbar,
+#pipeline-diagram::-webkit-scrollbar { height: 8px; }
+.table-wrap::-webkit-scrollbar-track,
+#pipeline-diagram::-webkit-scrollbar-track { background: transparent; }
+.table-wrap::-webkit-scrollbar-thumb,
+#pipeline-diagram::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border-radius: 999px;
+}
+.table-wrap::-webkit-scrollbar-thumb:hover,
+#pipeline-diagram::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
 .pipeline { margin: 8px 0 0; }
 #pipeline-diagram {
   width: 100%;
@@ -367,6 +319,13 @@ a:hover { text-decoration-thickness: 2px; }
   font-size: 11px;
   fill: var(--ink-soft);
 }
+/* knockout halo so a value sitting on a gridline / reference line stays legible */
+.val-label {
+  paint-order: stroke;
+  stroke: var(--chart-surface);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
 .axis-label { font-family: var(--mono); font-size: 10px; fill: var(--chart-label); }
 .grid-line { stroke: var(--chart-grid); stroke-width: 1; }
 .axis-line { stroke: var(--chart-axis); stroke-width: 1; }
@@ -449,18 +408,21 @@ a:hover { text-decoration-thickness: 2px; }
 .limits li { margin-bottom: 0.7em; color: var(--ink-soft); }
 
 .sec--cite { border-bottom: none; }
-.cite-block { margin-top: 24px; position: relative; max-width: 68ch; }
+.cite-block { margin-top: 24px; position: relative; }
 #bibtex {
   background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: 3px;
-  padding: 20px;
+  padding: 20px 22px;
   font-family: var(--mono);
   font-size: 0.8rem;
-  line-height: 1.6;
-  overflow-x: auto;
+  line-height: 1.7;
   color: var(--ink);
   margin: 0;
+  /* wrap rather than scroll — a horizontal scrollbar on a citation reads badly
+     and hides half the entry; BibTeX ignores newlines inside braces anyway. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 #copy-bib {
   margin-top: 12px;
