@@ -419,8 +419,9 @@ a:hover { text-decoration-thickness: 2px; }
   line-height: 1.7;
   color: var(--ink);
   margin: 0;
-  /* wrap rather than scroll — a horizontal scrollbar on a citation reads badly
-     and hides half the entry; BibTeX ignores newlines inside braces anyway. */
+  /* No hard-coded line breaks in the source: each field runs the full width of
+     the block and only wraps when it genuinely reaches the edge. Wrapping
+     rather than scrolling, since a scrollbar would hide half the entry. */
   white-space: pre-wrap;
   overflow-wrap: break-word;
 }
