@@ -39,7 +39,7 @@
       <p>Speech Large Language Models (Speech LLMs) are increasingly deployed in real-world acoustic environments, yet it remains unclear which measurable properties of background sounds best explain performance degradation. We present AIP-Speech, an inference-only benchmark that evaluates Speech LLM robustness under controlled mixtures of real-world background recordings. Rather than comparing robustness across background categories alone, we characterize each recording using interpretable acoustic descriptors and examine their associations with degradation. Across five open Speech LLMs, we find that simple spectral descriptors&mdash;including Zero Crossing Rate, Spectral Centroid, and Spectral Rolloff&mdash;consistently exhibit strong associations with degradation. We further quantify robustness disparities across accents and evaluate whether inference-time prompting improves resilience under adverse acoustic conditions. AIP-Speech provides a reproducible benchmark and descriptor-annotated background corpus for analyzing Speech LLM robustness.</p>
     </div>
 
-    <p class="finding"><span class="finding__mark">Finding</span>Simple spectral descriptors&mdash;Zero&nbsp;Crossing&nbsp;Rate, Spectral&nbsp;Centroid, Spectral&nbsp;Rolloff&mdash;consistently predict how much a background recording degrades Speech&nbsp;LLM performance, across five models and two tasks.</p>
+    <p class="finding"><span class="finding__mark">Finding&mdash;</span>Simple spectral descriptors&mdash;Zero&nbsp;Crossing&nbsp;Rate, Spectral&nbsp;Centroid, Spectral&nbsp;Rolloff&mdash;consistently predict how much a background recording degrades Speech&nbsp;LLM performance, across five models and two tasks.</p>
   </div>
 </header>
 
@@ -177,14 +177,16 @@
       <h2 class="sec__title" id="h-cite">Cite</h2>
       <div class="cite-block">
         <pre id="bibtex">@misc{dsouza2026aipspeech,
-  title        = {{AIP-Speech}: Auditing Speech LLM Robustness to Background
-                  Interference},
-  author       = {Dsouza, Aiden and Mishra, Shreyansh and Suneja, Yashraj and
-                  Swain, Rohan and Borkar, Samyak and Jaishankar, Arjun and
-                  Urade, Tanmay},
-  year         = {2026},
-  howpublished = {\url{https://github.com/IvLabs/AIP-Speech}},
-  note         = {Preprint. Venue and arXiv identifier pending.}
+  title     = {{AIP-Speech}: Auditing Speech {LLM} Robustness to Background
+               Interference},
+  author    = {Dsouza, Aiden and Mishra, Shreyansh and Suneja, Yashraj
+               and Swain, Rohan and Borkar, Samyak and Jaishankar, Arjun
+               and Urade, Tanmay},
+  booktitle = {Proceedings of the 2026 BlackboxNLP Workshop: Analyzing and
+               Interpreting Neural Networks for {NLP}},
+  year      = {2026},
+  publisher = {Association for Computational Linguistics},
+  note      = {To appear},
 }</pre>
         <button id="copy-bib" type="button">Copy BibTeX</button>
       </div>
