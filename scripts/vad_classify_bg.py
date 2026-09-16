@@ -40,7 +40,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import ROOT, DATA, SR, get_logger, load_audio
+from utils import ROOT, DATA, get_logger, load_audio
 
 log = get_logger("vad_classify_bg")
 
@@ -222,7 +222,7 @@ def classify_bg_folder(bg_dir: Path,
     log.info(f"[VAD] {len(wav_files)} WAV files in {bg_dir}")
     log.info(f"[VAD] Silero sensitivity (default=0.5)   : {silero_sensitivity}")
     log.info(f"[VAD] webrtcvad aggressiveness (0-3)     : {webrtc_aggressiveness}")
-    log.info(f"[VAD] Ensemble strategy                  : majority vote (both must agree)")
+    log.info("[VAD] Ensemble strategy                  : majority vote (both must agree)")
 
     has_webrtc = _webrtc_available()
     if not has_webrtc:
@@ -302,7 +302,7 @@ def _print_summary(records: list[dict]) -> None:
     log.info("  MULTI-VAD ENSEMBLE CLASSIFICATION SUMMARY")
     log.info(f"  Silero sensitivity : {SILERO_SENSITIVITY} (manufacturer default)")
     log.info(f"  webrtcvad aggress. : {WEBRTC_AGGRESSIVENESS} (moderate, published default)")
-    log.info(f"  Voting             : OR logic — if ANY model says speech_like, it is speech_like")
+    log.info("  Voting             : OR logic — if ANY model says speech_like, it is speech_like")
     log.info("=" * 65)
     log.info(f"  Total processed  : {len(records)}")
     log.info(f"  → speech_like    : {len(speech_like)}")

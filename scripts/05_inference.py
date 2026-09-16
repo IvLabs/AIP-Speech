@@ -59,15 +59,13 @@ except (ImportError, AttributeError):
 
 import argparse
 import gc
-import json
 import sys
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (ROOT, DATA, SR, SPEECH_LUFS, get_logger, ProgressLog,
+from utils import (ROOT, SR, get_logger,
                    jsonl_read, jsonl_ids, jsonl_append, load_audio)
 
 sys.path.insert(0, str(ROOT / "mixing"))
@@ -77,7 +75,6 @@ log = get_logger("05_inference")
 
 MANIFESTS  = ROOT / "manifests"
 INFER_DIR  = ROOT / "inference"
-PROGRESS   = ROOT / "checks" / "inference_progress.json"
 
 # ── task prompts ──────────────────────────────────────────────────────────────
 PROMPTS = {
@@ -472,7 +469,6 @@ ALL_TASKS  = [
 def build_manifests() -> None:
     """Generate manifests/asr.csv and manifests/kws.csv if not present."""
     import pandas as pd
-    import itertools
 
     battery = _load_battery()
     if not battery:
@@ -589,7 +585,6 @@ def vram_dry_run(model: SpeechLLM) -> None:
 
 # ── inference loop ────────────────────────────────────────────────────────────
 def run_inference_with_model(model: SpeechLLM, model_id: str, task: str) -> None:
-    prog = ProgressLog(PROGRESS)
     run_key = f"{model_id}_{task}"
 
     # Resolve manifest: strip steer/pN suffixes to get base task name (asr or kws)

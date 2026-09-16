@@ -14,11 +14,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 
 # Allow running from any cwd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-from utils import SR, SPEECH_LUFS, BG_LUFS, loudness_normalize, ROOT, csv_append
+from utils import SR, SPEECH_LUFS, loudness_normalize, ROOT, csv_append
 
 DIAG_CSV = ROOT / "checks" / "mix_diagnostics.csv"
 _DIAG_FIELDS = [

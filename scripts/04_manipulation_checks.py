@@ -24,12 +24,12 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (ROOT, DATA, SR, SPEECH_LUFS, BG_LUFS, get_logger,
-                   ProgressLog, jsonl_read, load_audio, loudness_normalize,
+from utils import (ROOT, SR, get_logger,
+                   ProgressLog, jsonl_read, load_audio,
                    csv_append)
 
 sys.path.insert(0, str(ROOT / "mixing"))
-from mix import mix, materialize, diagnostics, DIAG_CSV
+from mix import mix, materialize
 
 log = get_logger("04_manipulation_checks")
 PROGRESS    = ROOT / "checks" / "checks_progress.json"

@@ -15,15 +15,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import random
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (ROOT, DATA, CACHE, SR, get_logger, ProgressLog,
-                   jsonl_append, jsonl_ids, load_audio)
+from utils import (ROOT, DATA, CACHE, get_logger, ProgressLog,
+                   jsonl_append, jsonl_ids)
 
 log = get_logger("02_build_banks")
 

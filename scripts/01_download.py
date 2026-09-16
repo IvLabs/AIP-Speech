@@ -20,8 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import hashlib
-import os
 import subprocess
 import sys
 import zipfile
@@ -37,7 +35,7 @@ from urllib.request import urlretrieve
 
 # ── project imports ──────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import ROOT, DATA, CACHE, get_logger, ProgressLog
+from utils import ROOT, DATA, get_logger, ProgressLog
 
 log = get_logger("01_download")
 PROGRESS = ROOT / "checks" / "download_progress.json"

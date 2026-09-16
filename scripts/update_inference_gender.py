@@ -66,7 +66,7 @@ def main():
                         f.write(json.dumps(row) + "\n")
                 print(f"  -> Updated {updates_count} rows in {jsonl_file.name}")
             else:
-                print(f"  -> No updates needed.")
+                print("  -> No updates needed.")
 
 if __name__ == "__main__":
     main()

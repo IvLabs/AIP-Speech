@@ -22,7 +22,7 @@ import numpy as np
 import soundfile as sf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils import (ROOT, DATA, SR, SPEECH_LUFS, BG_LUFS, SNR_GRID,
+from utils import (ROOT, DATA, SR, BG_LUFS, SNR_GRID,
                    get_logger, ProgressLog, load_audio, loudness_normalize)
 
 log = get_logger("03_curate_battery")

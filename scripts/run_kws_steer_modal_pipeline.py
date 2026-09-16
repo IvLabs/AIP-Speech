@@ -1,7 +1,6 @@
 import modal
 import subprocess
 import os
-import sys
 
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.10")
@@ -86,8 +85,6 @@ secrets = [hf_secret] if hf_secret else []
     secrets=secrets,
 )
 def run_kws_steer_inference(model: str = "all"):
-    import time
-    import shutil
     os.chdir("/workspace")
     
     # Symlink results and inference directories to output volume
@@ -141,7 +138,7 @@ def main(model: str = "all"):
     print(f"Starting KWS STEERABILITY Inference on Modal. model={model}")
     
     def sync_volume():
-        print(f"Starting periodic volume sync (every 5 mins)...")
+        print("Starting periodic volume sync (every 5 mins)...")
         os.makedirs(local_inference_dir, exist_ok=True)
         os.makedirs(local_sync_all_dir, exist_ok=True)
         os.makedirs(local_results_dir, exist_ok=True)

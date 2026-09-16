@@ -12,8 +12,6 @@ Generates figures and tables for results_new/:
   - Saves full descriptor table & full correlation table to CSV for Appendix.
 """
 
-import os
-import sys
 from pathlib import Path
 import pandas as pd
 import numpy as np
